@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { useNavigate, Outlet } from 'react-router';
 import { supabase, useAuth } from '../context/AuthContext';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ShieldCheck } from 'lucide-react';
 
 export const AdminGuard = () => {
   const { session, loading, isAdmin: isUserAdmin } = useAuth();

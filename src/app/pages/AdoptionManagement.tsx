@@ -13,7 +13,7 @@ import {
   History
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiUrl, buildApiHeaders } from '../utils/api';
+import { apiUrl, buildApiHeaders, isApiFailure, parseApiJson, unwrapApiPayload } from '../utils/api';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 
 interface AdoptedPlant {
@@ -42,9 +42,12 @@ export const AdoptionManagement = () => {
       const response = await fetch(apiUrl('/plants'), {
         headers: await buildApiHeaders()
       });
-      if (!response.ok) throw new Error('Failed to fetch adopted plants');
-      const data = await response.json();
-      setPlants(data);
+      const payload = await parseApiJson(response);
+      if (!response.ok || isApiFailure(payload)) {
+        throw new Error(payload?.error || payload?.message || 'Failed to fetch adopted plants');
+      }
+      const data = unwrapApiPayload<any[]>(payload);
+      setPlants(Array.isArray(data) ? data : []);
     } catch (error) {
       toast.error('获取已认领植物失败');
       console.error(error);

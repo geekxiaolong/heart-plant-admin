@@ -22,7 +22,7 @@ import {
   ResponsiveContainer,
   Cell
 } from 'recharts';
-import { apiUrl, buildApiHeaders } from '../utils/api';
+import { apiUrl, buildApiHeaders, isApiFailure, parseApiJson, unwrapApiPayload } from '../utils/api';
 
 const data = [
   { name: '周一', value: 45, color: '#22c55e' },
@@ -48,11 +48,7 @@ export const DashboardHome = () => {
     const fetchStats = async () => {
       if (!session?.access_token) return;
       try {
-        const headers = { 
-          'Authorization': `Bearer ${publicAnonKey}`,
-          'apikey': publicAnonKey,
-          'X-User-JWT': session.access_token
-        };
+        const headers = await buildApiHeaders();
 
         const libraryRes = await fetch(apiUrl('/library'), { headers });
         if (!libraryRes.ok) {
@@ -61,36 +57,32 @@ export const DashboardHome = () => {
           throw new Error('Library fetch failed');
         }
         
-        let library;
-        try {
-          library = await libraryRes.json();
-        } catch (jsonErr) {
-          const rawBody = await libraryRes.clone().text();
-          console.error('Failed to parse library JSON. Raw body:', rawBody);
-          throw jsonErr;
+        const libraryPayload = await parseApiJson(libraryRes);
+        if (isApiFailure(libraryPayload)) {
+          throw new Error(libraryPayload?.error || libraryPayload?.message || 'Library fetch failed');
         }
-        
+        const library = unwrapApiPayload<any[]>(libraryPayload);
+        const safeLibrary = Array.isArray(library) ? library : [];
+
         const plantsRes = await fetch(apiUrl('/plants?admin_view=true'), { headers });
         if (!plantsRes.ok) {
           const errText = await plantsRes.text();
           console.error('Plants fetch failed:', errText);
           throw new Error('Plants fetch failed');
         }
-        
-        let plants;
-        try {
-          plants = await plantsRes.json();
-        } catch (jsonErr) {
-          const rawBody = await plantsRes.clone().text();
-          console.error('Failed to parse plants JSON. Raw body:', rawBody);
-          throw jsonErr;
+
+        const plantsPayload = await parseApiJson(plantsRes);
+        if (isApiFailure(plantsPayload)) {
+          throw new Error(plantsPayload?.error || plantsPayload?.message || 'Plants fetch failed');
         }
-        
+        const plants = unwrapApiPayload<any[]>(plantsPayload);
+        const safePlants = Array.isArray(plants) ? plants : [];
+
         setStats({
-          totalPlants: Array.isArray(library) ? library.length : 0,
-          onlineDevices: Array.isArray(plants) ? plants.length : 0,
+          totalPlants: safeLibrary.length,
+          onlineDevices: safePlants.length,
           activeUsers: 1420 + Math.floor(Math.random() * 50),
-          alerts: Array.isArray(plants) ? plants.filter((p: any) => p.alert).length : 0
+          alerts: safePlants.filter((p: any) => p.alert).length
         });
       } catch (error) {
         console.error('Dashboard stats fetch error:', error);

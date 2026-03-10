@@ -443,12 +443,7 @@ export function PlantsTab() {
     try {
       const res = await fetch(apiUrl('/library'), {
         method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${publicAnonKey}`,
-          'apikey': publicAnonKey,
-          'X-User-JWT': session?.access_token || '',
-          'Content-Type': 'application/json'
-        },
+        headers: await buildApiHeaders(true),
         body: JSON.stringify({ ...data, adoptCount: 0 })
       });
       if (res.ok) {
@@ -465,12 +460,7 @@ export function PlantsTab() {
     try {
       const res = await fetch(apiUrl('/library'), {
         method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${publicAnonKey}`,
-          'apikey': publicAnonKey,
-          'X-User-JWT': session?.access_token || '',
-          'Content-Type': 'application/json'
-        },
+        headers: await buildApiHeaders(true),
         body: JSON.stringify({ ...editingPlant, ...data })
       });
       if (res.ok) {
@@ -486,7 +476,7 @@ export function PlantsTab() {
   const handleDeletePlant = async (id: number | string) => {
     if (confirm('确定要删除这个植物吗？此操作不可撤销。')) {
       try {
-      const res = await fetch(apiUrl('/library/${id}'), {
+      const res = await fetch(apiUrl(`/library/${id}`), {
         method: 'DELETE',
         headers: await buildApiHeaders()
       });
@@ -505,12 +495,7 @@ export function PlantsTab() {
     if (!plant) return;
       const res = await fetch(apiUrl('/library'), {
         method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${publicAnonKey}`,
-          'apikey': publicAnonKey,
-          'X-User-JWT': session?.access_token || '',
-          'Content-Type': 'application/json'
-        },
+        headers: await buildApiHeaders(true),
         body: JSON.stringify({ ...plant, status: plant.status === 'active' ? 'inactive' : 'active' })
       });
       if (res.ok) {

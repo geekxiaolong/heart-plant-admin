@@ -5,7 +5,9 @@
 import { projectId, publicAnonKey } from '/utils/supabase/info';
 import { supabase } from './supabaseClient';
 
-const API_BASE_URL = `https://${projectId}.supabase.co/functions/v1/make-server-4b732228`;
+const API_BASE_URL = (typeof window !== 'undefined' && window.location.hostname === '127.0.0.1')
+  ? 'http://127.0.0.1:8000'
+  : `https://${projectId}.supabase.co/functions/v1/make-server-4b732228`;
 
 export function apiUrl(endpoint: string): string {
   const normalized = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
@@ -32,11 +34,11 @@ export async function buildApiHeaders(includeContentType: boolean = false): Prom
   const token = await getSessionToken();
 
   const headers: Record<string, string> = {
-    'Authorization': `Bearer ${publicAnonKey}`,
     'apikey': publicAnonKey,
   };
 
   if (token && token !== 'undefined' && token !== 'null') {
+    headers['Authorization'] = `Bearer ${token}`;
     headers['X-User-JWT'] = token;
   }
 
@@ -50,28 +52,52 @@ export async function buildApiHeaders(includeContentType: boolean = false): Prom
 /**
  * 处理 API 响应
  */
-async function handleResponse<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    let errorMessage = `API Error: ${response.status} ${response.statusText}`;
-
-    try {
-      const errorData = await response.json();
-      errorMessage = errorData.error || errorData.message || errorMessage;
-      console.error('API Error Details:', errorData);
-    } catch (e) {
-      console.error('API Error (non-JSON):', errorMessage);
-    }
-
-    throw new Error(errorMessage);
-  }
+export async function parseApiJson(response: Response): Promise<any> {
+  const text = await response.text();
+  if (!text) return null;
 
   try {
-    const data = await response.json();
-    return data as T;
+    return JSON.parse(text);
   } catch (error) {
     console.error('Failed to parse JSON response:', error);
     throw new Error('Invalid JSON response from server');
   }
+}
+
+export function unwrapApiPayload<T>(payload: any): T {
+  if (payload == null || Array.isArray(payload) || typeof payload !== 'object') {
+    return payload as T;
+  }
+
+  if ('data' in payload) return payload.data as T;
+  if ('result' in payload) return payload.result as T;
+  if ('items' in payload) return payload.items as T;
+
+  return payload as T;
+}
+
+export function isApiFailure(payload: any): boolean {
+  return Boolean(payload && typeof payload === 'object' && payload.success === false);
+}
+
+async function handleResponse<T>(response: Response): Promise<T> {
+  const payload = await parseApiJson(response);
+
+  if (!response.ok) {
+    const errorMessage = payload?.error || payload?.message || `API Error: ${response.status} ${response.statusText}`;
+    if (payload) {
+      console.error('API Error Details:', payload);
+    } else {
+      console.error('API Error (empty response):', errorMessage);
+    }
+    throw new Error(errorMessage);
+  }
+
+  if (isApiFailure(payload)) {
+    throw new Error(payload?.error || payload?.message || 'Request failed');
+  }
+
+  return unwrapApiPayload<T>(payload);
 }
 
 /**

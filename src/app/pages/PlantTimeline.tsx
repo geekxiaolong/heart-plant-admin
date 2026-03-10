@@ -18,7 +18,7 @@ import {
   Heart
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiUrl, buildApiHeaders } from '../utils/api';
+import { apiUrl, buildApiHeaders, isApiFailure, parseApiJson, unwrapApiPayload } from '../utils/api';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 
 interface TimelineItem {
@@ -58,10 +58,15 @@ export const PlantTimeline = () => {
       const response = await fetch(apiUrl('/plants'), {
         headers: await buildApiHeaders()
       });
-      const data = await response.json();
-      setPlants(data);
-      if (!selectedPlantId && data.length > 0) {
-        setSelectedPlantId(data[0].id);
+      const payload = await parseApiJson(response);
+      if (!response.ok || isApiFailure(payload)) {
+        throw new Error(payload?.error || payload?.message || 'Failed to fetch plants');
+      }
+      const data = unwrapApiPayload<any[]>(payload);
+      const safePlants = Array.isArray(data) ? data : [];
+      setPlants(safePlants);
+      if (!selectedPlantId && safePlants.length > 0) {
+        setSelectedPlantId(safePlants[0].id);
       }
     } catch (error) {
       console.error('Failed to fetch plants', error);
@@ -75,11 +80,15 @@ export const PlantTimeline = () => {
     if (!id) return;
     setTimelineLoading(true);
     try {
-      const response = await fetch(apiUrl('/plant-timeline/${id}'), {
+      const response = await fetch(apiUrl(`/plant-timeline/${id}`), {
         headers: await buildApiHeaders()
       });
-      const data = await response.json();
-      setTimeline(data);
+      const payload = await parseApiJson(response);
+      if (!response.ok || isApiFailure(payload)) {
+        throw new Error(payload?.error || payload?.message || 'Failed to fetch timeline');
+      }
+      const data = unwrapApiPayload<any[]>(payload);
+      setTimeline(Array.isArray(data) ? data : []);
     } catch (error) {
       toast.error('无法加载时间轴数据');
       console.error(error);

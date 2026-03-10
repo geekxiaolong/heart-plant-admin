@@ -3,8 +3,6 @@ import { useNavigate } from 'react-router';
 import { 
   Video, 
   Wifi, 
-  Activity, 
-  Clock, 
   Signal,
   ArrowLeft,
   RefreshCw,
@@ -20,10 +18,9 @@ export function VideoStatus() {
   const [status, setStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
   const [fps, setFps] = useState(0);
   const [latency, setLatency] = useState(0);
-  const [streamUrl] = useState('ws://localhost:8889/mystream/whep');
+  const [streamUrl] = useState('http://localhost:8889/mystream/whep');
   const [bytesReceived, setBytesReceived] = useState(0);
   const [packetsLost, setPacketsLost] = useState(0);
-  const [isPlayerMounted, setIsPlayerMounted] = useState(false);
 
   // 模拟网络统计数据（实际应从 WebRTC 获取）
   useEffect(() => {
@@ -62,7 +59,7 @@ export function VideoStatus() {
         >
           <div className="flex items-center gap-4">
             <button
-              onClick={() => navigate('/interaction')}
+              onClick={() => navigate('/admin/monitoring')}
               className="p-2 hover:bg-white/50 rounded-full transition-colors"
             >
               <ArrowLeft size={24} className="text-gray-700" />

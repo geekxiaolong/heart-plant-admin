@@ -58,7 +58,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
   };
 
-  const isAdmin = state.user?.email === '776427024@qq.com' || state.user?.user_metadata?.role === 'admin';
+  const userEmail = state.user?.email?.toLowerCase();
+  const isAdmin = userEmail === '776427024@qq.com' || state.user?.user_metadata?.role === 'admin';
 
   return (
     <AuthContext.Provider value={{ ...state, isAdmin, signOut }}>

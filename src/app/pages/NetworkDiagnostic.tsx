@@ -455,7 +455,7 @@ apiAddress: :9997`;
                 MediaMTX 文档
               </a>
               <button
-                onClick={() => navigate('/stream-test')}
+                onClick={() => navigate('/admin/stream-test')}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-2xl text-sm font-bold hover:bg-blue-700 transition-all"
               >
                 <Camera size={16} />

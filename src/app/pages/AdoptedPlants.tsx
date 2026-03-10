@@ -16,7 +16,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiUrl, buildApiHeaders } from '../utils/api';
+import { apiUrl, buildApiHeaders, isApiFailure, parseApiJson, unwrapApiPayload } from '../utils/api';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 
 interface ClaimedPlant {
@@ -48,14 +48,14 @@ export const AdoptedPlants = () => {
       const response = await fetch(url, {
         headers: await buildApiHeaders()
       });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Server error response:', errorText);
-        throw new Error(`Server responded with ${response.status}: ${errorText}`);
+
+      const payload = await parseApiJson(response);
+      if (!response.ok || isApiFailure(payload)) {
+        console.error('Server error response:', payload);
+        throw new Error(payload?.error || payload?.message || `Server responded with ${response.status}`);
       }
-      
-      const data = await response.json();
+
+      const data = unwrapApiPayload<any[]>(payload);
       setPlants(Array.isArray(data) ? data : []);
     } catch (error: any) {
       toast.error('获取认领数据失败: ' + (error.message || '网络错误'));
