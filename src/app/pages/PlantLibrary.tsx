@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { 
   Search, 
   Plus, 
@@ -15,7 +15,8 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
-import { apiGet, apiDelete } from '../utils/api';
+import { apiDelete, apiGet, unwrapApiPayload } from '../utils/api';
+import { unsupportedMessage } from '../utils/backendCapabilities';
 
 interface Plant {
   id: string;
@@ -36,6 +37,7 @@ interface Plant {
 
 export const PlantLibrary = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [plants, setPlants] = useState<Plant[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -43,8 +45,13 @@ export const PlantLibrary = () => {
 
   const fetchLibrary = async () => {
     try {
-      const data = await apiGet<Plant[]>('/library');
-      setPlants(data);
+      const data = await apiGet<any>('/library');
+      const safePlants = Array.isArray(data)
+        ? data
+        : Array.isArray(unwrapApiPayload<any>(data))
+          ? unwrapApiPayload<any>(data)
+          : [];
+      setPlants(safePlants as Plant[]);
     } catch (error: any) {
       toast.error('获取植物库失败：' + error.message);
       console.error('Fetch library error:', error);
@@ -57,15 +64,43 @@ export const PlantLibrary = () => {
     fetchLibrary();
   }, []);
 
+  useEffect(() => {
+    if (location.state?.refresh) {
+      fetchLibrary();
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location.key]);
+
   const handleDelete = async (id: string) => {
-    if (!confirm('确定要从植物库中移除这种植物吗？')) return;
+    if (!confirm('确定要删除这个植物吗？此操作不可撤销。')) return;
+
     try {
-      await apiDelete(`/library/${id}`);
-      toast.success('已从植物库中移除');
-      setPlants(plants.filter(p => p.id !== id));
+      const result = await apiDelete<{ success?: boolean; error?: string }>(`/library/${id}`);
+      if (result?.success === false) {
+        throw new Error(result.error || '删除失败');
+      }
+      toast.success('植物已从名录移除');
+      await fetchLibrary();
     } catch (error: any) {
-      toast.error('删除失败：' + error.message);
-      console.error('Delete error:', error);
+      const message = error?.message || '';
+      if (message.includes('KV delete is not available')) {
+        toast.error('当前运行环境暂未开启删除能力，请稍后重试或检查 KV 删除支持。');
+        return;
+      }
+      if (message.includes('Unauthorized')) {
+        toast.error('登录状态已失效，请重新登录后再试。');
+        return;
+      }
+      if (message.includes('Forbidden')) {
+        toast.error('当前账号没有删除植物库的权限。');
+        return;
+      }
+      if (message.includes('not found')) {
+        toast.error('该植物已不存在，列表将自动刷新。');
+        await fetchLibrary();
+        return;
+      }
+      toast.error(`删除失败：${message || unsupportedMessage('libraryDelete')}`);
     }
   };
 
@@ -100,6 +135,7 @@ export const PlantLibrary = () => {
           <span>添加新植物</span>
         </button>
       </div>
+
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredPlants.map((plant) => (

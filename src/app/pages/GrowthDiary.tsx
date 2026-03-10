@@ -11,12 +11,13 @@ import {
   Plus,
   RefreshCw
 } from 'lucide-react';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { toast } from 'sonner';
-import { apiUrl, buildApiHeaders } from '../utils/api';
+import { apiUrl, buildApiHeaders, isApiFailure, parseApiJson, unwrapApiPayload } from '../utils/api';
 
 export const GrowthDiary = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [plants, setPlants] = useState<any[]>([]);
   const [allJournals, setAllJournals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,38 +31,38 @@ export const GrowthDiary = () => {
       const plantResponse = await fetch(apiUrl('/plants'), {
         headers: await buildApiHeaders()
       });
-      const plantData = await plantResponse.json();
-      setPlants(plantData);
-
-    // 2. Fetch all journals using the new efficient endpoint
-    const url = apiUrl('/all-journals');
-    console.log('Fetching journals from:', url);
-    const journalResponse = await fetch(url, {
-      headers: { 
-        'Authorization': `Bearer ${publicAnonKey}`,
-        'apikey': publicAnonKey
+      const plantPayload = await parseApiJson(plantResponse);
+      if (!plantResponse.ok || isApiFailure(plantPayload)) {
+        throw new Error(plantPayload?.error || plantPayload?.message || 'Failed to fetch plants');
       }
-    });
-    
-    if (journalResponse.ok) {
-      const journalData = await journalResponse.json();
-      
+      const plantData = unwrapApiPayload<any[]>(plantPayload);
+      const safePlants = Array.isArray(plantData) ? plantData : [];
+      setPlants(safePlants);
+
+      // 2. Fetch all journals using the new efficient endpoint
+      const url = apiUrl('/all-journals');
+      console.log('Fetching journals from:', url);
+      const journalResponse = await fetch(url, {
+        headers: await buildApiHeaders()
+      });
+      const journalPayload = await parseApiJson(journalResponse);
+      if (!journalResponse.ok || isApiFailure(journalPayload)) {
+        throw new Error(journalPayload?.error || journalPayload?.message || `Failed to fetch journals: ${journalResponse.status}`);
+      }
+      const journalData = unwrapApiPayload<any[]>(journalPayload);
+      const safeJournals = Array.isArray(journalData) ? journalData : [];
+
       // Enhance journal data with plant info
-      const enhancedJournals = journalData.map((journal: any) => {
-        const plant = plantData.find((p: any) => p.id === journal.plantId);
+      const enhancedJournals = safeJournals.map((journal: any) => {
+        const plant = safePlants.find((p: any) => String(p.id) === String(journal.plantId));
         return {
           ...journal,
           plantName: plant?.name || '未知植物',
-          plantImage: plant?.image || 'https://images.unsplash.com/photo-1485955900006-10f4d324d411?q=80&w=100'
+          plantImage: plant?.imageUrl || plant?.image || 'https://images.unsplash.com/photo-1485955900006-10f4d324d411?q=80&w=100'
         };
       });
       
       setAllJournals(enhancedJournals);
-    } else {
-      const errorText = await journalResponse.text();
-      console.error('Server error response:', errorText);
-      throw new Error(`Failed to fetch journals: ${journalResponse.status} ${errorText}`);
-    }
     } catch (error) {
       toast.error('加载日记数据失败');
       console.error(error);
@@ -74,6 +75,13 @@ export const GrowthDiary = () => {
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    if (location.state?.refresh) {
+      fetchData();
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location.key]);
 
   const filteredJournals = useMemo(() => {
     if (!searchTerm.trim()) return allJournals;
@@ -91,8 +99,8 @@ export const GrowthDiary = () => {
     const todayCount = allJournals.filter(j => new Date(j.timestamp).toLocaleDateString() === today).length;
     
     const modeDistribution = allJournals.reduce((acc: any, j) => {
-      const plant = plants.find(p => p.id === j.plantId);
-      const mode = plant?.type || 'unknown';
+      const plant = plants.find(p => String(p.id) === String(j.plantId));
+      const mode = plant?.scene || 'unknown';
       acc[mode] = (acc[mode] || 0) + 1;
       return acc;
     }, {});
@@ -142,10 +150,10 @@ export const GrowthDiary = () => {
             </h4>
             <div className="space-y-5">
               {[
-                { label: '亲情模式', key: 'kinship', color: 'bg-blue-500', shadow: 'shadow-blue-500/20' },
-                { label: '爱情模式', key: 'romance', color: 'bg-red-500', shadow: 'shadow-red-500/20' },
-                { label: '友情模式', key: 'friendship', color: 'bg-orange-500', shadow: 'shadow-orange-500/20' },
-                { label: '悦己模式', key: 'solo', color: 'bg-purple-500', shadow: 'shadow-purple-500/20' },
+                { label: '亲情模式', key: 'family', color: 'bg-blue-500', shadow: 'shadow-blue-500/20' },
+                { label: '爱情模式', key: 'love', color: 'bg-red-500', shadow: 'shadow-red-500/20' },
+                { label: '友情模式', key: 'friend', color: 'bg-orange-500', shadow: 'shadow-orange-500/20' },
+                { label: '悦己模式', key: 'self', color: 'bg-purple-500', shadow: 'shadow-purple-500/20' },
               ].map(item => {
                 const count = stats.modeDistribution[item.key] || 0;
                 const percentage = allJournals.length > 0 ? (count / allJournals.length) * 100 : 0;

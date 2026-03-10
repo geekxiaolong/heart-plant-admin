@@ -10,7 +10,8 @@ import {
   Plus
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiUrl, buildApiHeaders } from '../utils/api';
+import { apiUrl, buildApiHeaders, isApiFailure, parseApiJson, unwrapApiPayload } from '../utils/api';
+import { backendCapabilities, unsupportedMessage } from '../utils/backendCapabilities';
 
 export const AddPlant = () => {
   const navigate = useNavigate();
@@ -52,6 +53,11 @@ export const AddPlant = () => {
       return;
     }
 
+    if (!backendCapabilities.uploadImage) {
+      toast.error(unsupportedMessage('uploadImage', '当前后端未提供图片上传接口，请直接填写图片 URL。'));
+      return;
+    }
+
     setUploading(true);
     try {
       // 1. Get signed upload URL
@@ -64,8 +70,12 @@ export const AddPlant = () => {
         })
       });
 
-      if (!response.ok) throw new Error('Failed to get upload URL');
-      const { uploadUrl, path } = await response.json();
+      const uploadPayload = await parseApiJson(response);
+      const uploadData = unwrapApiPayload<any>(uploadPayload);
+      if (!response.ok || isApiFailure(uploadPayload) || !uploadData?.uploadUrl || !uploadData?.path) {
+        throw new Error(uploadPayload?.error || uploadPayload?.message || 'Failed to get upload URL');
+      }
+      const { uploadUrl, path } = uploadData;
 
       // 2. Upload to storage
       const uploadResponse = await fetch(uploadUrl, {
@@ -77,17 +87,28 @@ export const AddPlant = () => {
       if (!uploadResponse.ok) throw new Error('Failed to upload image');
 
       // 3. Get public URL (via our server's signed URL route for the final link)
-      const urlResponse = await fetch(apiUrl('/image-url/${encodeURIComponent(path)}'), {
+      const urlResponse = await fetch(apiUrl(`/image-url/${encodeURIComponent(path)}`), {
         headers: await buildApiHeaders()
       });
-      const { url } = await urlResponse.json();
+      const urlPayload = await parseApiJson(urlResponse);
+      const urlData = unwrapApiPayload<any>(urlPayload);
+      if (!urlResponse.ok || isApiFailure(urlPayload) || !urlData?.url) {
+        throw new Error(urlPayload?.error || urlPayload?.message || 'Failed to create image URL');
+      }
 
-      setFormData(prev => ({ ...prev, imageUrl: url }));
+      setFormData(prev => ({ ...prev, imageUrl: urlData.url }));
       setImagePreview(URL.createObjectURL(file));
       toast.success('图片上传成功');
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      toast.error('图片上传失败，请重试');
+      const message = error?.message || '';
+      if (message.includes('Unauthorized')) {
+        toast.error('登录状态已失效，请重新登录后再试。');
+      } else if (message.includes('Forbidden')) {
+        toast.error('当前账号没有上传图片的权限。');
+      } else {
+        toast.error(`图片上传失败：${message || unsupportedMessage('uploadImage')}`);
+      }
     } finally {
       setUploading(false);
     }
@@ -106,8 +127,8 @@ export const AddPlant = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.imageUrl) {
-      toast.error('请填写必要信息并上传图片');
+    if (!formData.name || !formData.imageUrl.trim()) {
+      toast.error('请填写植物名称，并提供可用图片地址');
       return;
     }
 
@@ -123,11 +144,14 @@ export const AddPlant = () => {
         })
       });
 
-      if (!response.ok) throw new Error('Failed to save');
+      const payload = await parseApiJson(response);
+      if (!response.ok || isApiFailure(payload)) {
+        throw new Error(payload?.error || payload?.message || 'Failed to save');
+      }
       toast.success('植物已成功添加到名录');
-      navigate('/admin/plants');
-    } catch (error) {
-      toast.error('保存失败，请重试');
+      navigate('/admin/plants', { state: { refresh: true, source: 'add-plant', ts: Date.now() } });
+    } catch (error: any) {
+      toast.error(`保存失败：${error?.message || '请重试'}`);
     } finally {
       setLoading(false);
     }
@@ -188,6 +212,21 @@ export const AddPlant = () => {
               提示：优质的图片能提高用户的认领意愿。建议使用 4:3 或 1:1 比例的植物特写照。
             </p>
           </div>
+          <div className="space-y-2">
+            <label className="text-sm font-bold text-gray-900">图片 URL</label>
+            <input
+              type="url"
+              placeholder="https://example.com/plant.jpg"
+              className="w-full bg-white border border-gray-200 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-green-500/20"
+              value={formData.imageUrl}
+              onChange={e => {
+                const value = e.target.value;
+                setFormData(prev => ({ ...prev, imageUrl: value }));
+                if (value) setImagePreview(value);
+              }}
+            />
+            <p className="text-[10px] text-gray-400">若当前环境上传失败，也可以直接粘贴对象存储或公开 CDN 图片地址。</p>
+          </div>
         </div>
 
         {/* Form Fields Area */}
@@ -240,7 +279,7 @@ export const AddPlant = () => {
                 >
                   <option value="family">亲情模式 (家人互动)</option>
                   <option value="love">爱情模式 (情侣养成)</option>
-                  <option value="friend">友情模式 (��友合种)</option>
+                  <option value="friend">友情模式 (挚友合种)</option>
                   <option value="self">悦己模式 (独享时光)</option>
                 </select>
               </div>

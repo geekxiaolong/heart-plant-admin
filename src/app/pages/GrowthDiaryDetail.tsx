@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router';
+import { useLocation, useParams, useNavigate } from 'react-router';
 import { 
   ArrowLeft, 
   Calendar, 
@@ -15,34 +15,55 @@ import {
   Heart
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiUrl, buildApiHeaders } from '../utils/api';
+import { apiUrl, buildApiHeaders, isApiFailure, parseApiJson, unwrapApiPayload } from '../utils/api';
+import { backendCapabilities, unsupportedMessage } from '../utils/backendCapabilities';
 
 export const GrowthDiaryDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [journal, setJournal] = useState<any>(null);
   const [plant, setPlant] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
 
+  const handleBackToList = () => {
+    navigate('/admin/diary', {
+      state: location.state?.refreshList
+        ? { refresh: true, source: location.state?.source || 'journal-detail', ts: location.state?.ts || Date.now() }
+        : undefined,
+    });
+  };
+
   const fetchJournalDetail = async () => {
     try {
       // 1. Fetch the journal
-      const response = await fetch(apiUrl('/journal-detail/${id}'), {
-        headers: { Authorization: `Bearer ${publicAnonKey}` }
+      const response = await fetch(apiUrl(`/journal-detail/${id}`), {
+        headers: await buildApiHeaders()
       });
-      if (!response.ok) throw new Error('Failed to fetch journal');
-      const data = await response.json();
+      const payload = await parseApiJson(response);
+      if (!response.ok || isApiFailure(payload)) {
+        throw new Error(payload?.error || payload?.message || 'Failed to fetch journal');
+      }
+      const data = unwrapApiPayload<any>(payload);
+      if (!data || typeof data !== 'object') {
+        throw new Error('Invalid journal detail payload');
+      }
       setJournal(data);
 
       // 2. Fetch the plant info for context
       if (data.plantId) {
         const plantResponse = await fetch(apiUrl('/plants'), {
-          headers: { Authorization: `Bearer ${publicAnonKey}` }
+          headers: await buildApiHeaders()
         });
-        const plants = await plantResponse.json();
-        const foundPlant = plants.find((p: any) => p.id === data.plantId);
-        setPlant(foundPlant);
+        const plantPayload = await parseApiJson(plantResponse);
+        if (!plantResponse.ok || isApiFailure(plantPayload)) {
+          throw new Error(plantPayload?.error || plantPayload?.message || 'Failed to fetch plants');
+        }
+        const plants = unwrapApiPayload<any[]>(plantPayload);
+        const safePlants = Array.isArray(plants) ? plants : [];
+        const foundPlant = safePlants.find((p: any) => String(p.id) === String(data.plantId));
+        setPlant(foundPlant || null);
       }
     } catch (error) {
       toast.error('获取详情失败');
@@ -53,40 +74,81 @@ export const GrowthDiaryDetail = () => {
   };
 
   const handleToggleFeatured = async () => {
+    if (!backendCapabilities.journalFeature) {
+      toast.error(unsupportedMessage('journalFeature'));
+      return;
+    }
+
     setIsProcessing(true);
     try {
-      const response = await fetch(apiUrl('/journal-feature/${id}'), {
+      const response = await fetch(apiUrl(`/journal-feature/${id}`), {
         method: 'POST',
-        headers: { Authorization: `Bearer ${publicAnonKey}` }
+        headers: await buildApiHeaders()
       });
-      const data = await response.json();
-      if (data.success) {
-        setJournal({ ...journal, isFeatured: data.isFeatured });
-        toast.success(data.isFeatured ? '已设为精选' : '已取消精选');
+      const payload = await parseApiJson(response);
+      const data = unwrapApiPayload<any>(payload);
+      if (!response.ok || isApiFailure(payload)) {
+        throw new Error(payload?.error || payload?.message || '操作失败');
       }
-    } catch (error) {
-      toast.error('操作失败');
+      const nextFeatured = typeof data?.isFeatured === 'boolean' ? data.isFeatured : !journal?.isFeatured;
+      setJournal((prev: any) => prev ? { ...prev, isFeatured: nextFeatured } : prev);
+      toast.success(nextFeatured ? '已设为精选' : '已取消精选');
+      navigate(location.pathname, {
+        replace: true,
+        state: { refreshList: true, source: 'journal-feature', ts: Date.now() },
+      });
+    } catch (error: any) {
+      const message = error?.message || '';
+      if (message.includes('Unauthorized')) {
+        toast.error('登录状态已失效，请重新登录后再试。');
+      } else if (message.includes('Forbidden')) {
+        toast.error('当前账号没有精选日记的权限。');
+      } else if (message.includes('Journal not found')) {
+        toast.error('这篇日记已不存在，建议返回列表刷新。');
+      } else if (message.includes('KV set is not available')) {
+        toast.error('当前运行环境暂未开启日记精选写入能力。');
+      } else {
+        toast.error(`操作失败：${message || unsupportedMessage('journalFeature')}`);
+      }
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleDeleteJournal = async () => {
+    if (!backendCapabilities.journalDelete) {
+      toast.error(unsupportedMessage('journalDelete'));
+      return;
+    }
+
     if (!confirm('确定要下架并删除该篇日记吗？此操作不可撤销。')) return;
     
     setIsProcessing(true);
     try {
-      const response = await fetch(apiUrl('/journal/${id}'), {
+      const response = await fetch(apiUrl(`/journal/${id}`), {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${publicAnonKey}` }
+        headers: await buildApiHeaders()
       });
-      const data = await response.json();
-      if (data.success) {
-        toast.success('日记已成功下架');
-        navigate('/admin/diary');
+      const payload = await parseApiJson(response);
+      if (!response.ok || isApiFailure(payload)) {
+        throw new Error(payload?.error || payload?.message || '删除失败');
       }
-    } catch (error) {
-      toast.error('删除失败');
+      toast.success('日记已成功下架');
+      navigate('/admin/diary', { state: { refresh: true, source: 'journal-delete', ts: Date.now() } });
+    } catch (error: any) {
+      const message = error?.message || '';
+      if (message.includes('Unauthorized')) {
+        toast.error('登录状态已失效，请重新登录后再试。');
+      } else if (message.includes('Forbidden')) {
+        toast.error('当前账号没有删除日记的权限。');
+      } else if (message.includes('Journal not found')) {
+        toast.error('这篇日记已被删除，返回列表后会自动刷新。');
+        navigate('/admin/diary', { state: { refresh: true, source: 'journal-missing', ts: Date.now() } });
+      } else if (message.includes('KV delete is not available')) {
+        toast.error('当前运行环境暂未开启日记删除能力。');
+      } else {
+        toast.error(`删除失败：${message || unsupportedMessage('journalDelete')}`);
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -123,7 +185,7 @@ export const GrowthDiaryDetail = () => {
       {/* Header Navigation */}
       <div className="flex items-center justify-between">
         <button 
-          onClick={() => navigate('/admin/diary')}
+          onClick={handleBackToList}
           className="flex items-center gap-2 text-gray-500 hover:text-gray-900 transition-colors group bg-white border border-gray-100 px-4 py-2 rounded-xl shadow-sm"
         >
           <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
@@ -247,7 +309,7 @@ export const GrowthDiaryDetail = () => {
           {plant && (
             <div className="bg-white border border-gray-100 rounded-[32px] overflow-hidden shadow-sm">
               <div className="aspect-square relative">
-                <img src={plant.image} alt={plant.name} className="w-full h-full object-cover" />
+                <img src={plant.imageUrl || plant.image} alt={plant.name} className="w-full h-full object-cover" />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
                 <div className="absolute bottom-6 left-6 right-6 text-white">
                   <p className="text-[10px] font-bold uppercase tracking-widest opacity-80 mb-1">关联植物</p>
@@ -257,18 +319,18 @@ export const GrowthDiaryDetail = () => {
               <div className="p-6 space-y-4">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-gray-400 flex items-center gap-1"><Calendar size={14} /> 认领时长</span>
-                  <span className="font-bold text-gray-900">{plant.days} 天</span>
+                  <span className="font-bold text-gray-900">{plant.days ?? '--'} 天</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-gray-400 flex items-center gap-1"><Layout size={14} /> 情感模式</span>
                   <span className={`font-bold ${
-                    plant.type === 'romance' ? 'text-red-500' : 
-                    plant.type === 'kinship' ? 'text-blue-500' : 
-                    plant.type === 'friendship' ? 'text-orange-500' : 'text-purple-500'
+                    plant.scene === 'love' ? 'text-red-500' : 
+                    plant.scene === 'family' ? 'text-blue-500' : 
+                    plant.scene === 'friend' ? 'text-orange-500' : 'text-purple-500'
                   }`}>
-                    {plant.type === 'romance' ? '爱情模式' : 
-                     plant.type === 'kinship' ? '亲情模式' : 
-                     plant.type === 'friendship' ? '友情模式' : '悦己模式'}
+                    {plant.scene === 'love' ? '爱情模式' : 
+                     plant.scene === 'family' ? '亲情模式' : 
+                     plant.scene === 'friend' ? '友情模式' : '悦己模式'}
                   </span>
                 </div>
                 <button 

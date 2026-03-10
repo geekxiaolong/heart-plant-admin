@@ -11,8 +11,8 @@ import {
   Trash2
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiUrl, buildApiHeaders } from '../utils/api';
-import { apiGet } from '../utils/api';
+import { apiUrl, buildApiHeaders, apiGet, isApiFailure, parseApiJson, unwrapApiPayload } from '../utils/api';
+import { backendCapabilities, unsupportedMessage } from '../utils/backendCapabilities';
 
 export const EditPlant = () => {
   const { id } = useParams();
@@ -51,8 +51,13 @@ export const EditPlant = () => {
     const fetchPlant = async () => {
       if (!id) return;
       try {
-        const library = await apiGet<any[]>('/library');
-        const plant = library.find(p => p.id === id);
+        const library = await apiGet<any>('/library');
+        const safeLibrary = Array.isArray(library)
+          ? library
+          : Array.isArray(unwrapApiPayload<any[]>(library))
+            ? unwrapApiPayload<any[]>(library)
+            : [];
+        const plant = safeLibrary.find(p => String(p.id) === String(id));
         if (plant) {
           setFormData({
             ...plant,
@@ -89,6 +94,11 @@ export const EditPlant = () => {
       return;
     }
 
+    if (!backendCapabilities.uploadImage) {
+      toast.error(unsupportedMessage('uploadImage', '当前后端未提供图片上传接口，请直接填写图片 URL。'));
+      return;
+    }
+
     setUploading(true);
     try {
       const response = await fetch(apiUrl('/upload-url'), {
@@ -100,8 +110,12 @@ export const EditPlant = () => {
         })
       });
 
-      if (!response.ok) throw new Error('Failed to get upload URL');
-      const { uploadUrl, path } = await response.json();
+      const uploadPayload = await parseApiJson(response);
+      const uploadData = unwrapApiPayload<any>(uploadPayload);
+      if (!response.ok || isApiFailure(uploadPayload) || !uploadData?.uploadUrl || !uploadData?.path) {
+        throw new Error(uploadPayload?.error || uploadPayload?.message || 'Failed to get upload URL');
+      }
+      const { uploadUrl, path } = uploadData;
 
       const uploadResponse = await fetch(uploadUrl, {
         method: 'PUT',
@@ -111,17 +125,28 @@ export const EditPlant = () => {
 
       if (!uploadResponse.ok) throw new Error('Failed to upload image');
 
-      const urlResponse = await fetch(apiUrl('/image-url/${encodeURIComponent(path)}'), {
+      const urlResponse = await fetch(apiUrl(`/image-url/${encodeURIComponent(path)}`), {
         headers: await buildApiHeaders()
       });
-      const { url } = await urlResponse.json();
+      const urlPayload = await parseApiJson(urlResponse);
+      const urlData = unwrapApiPayload<any>(urlPayload);
+      if (!urlResponse.ok || isApiFailure(urlPayload) || !urlData?.url) {
+        throw new Error(urlPayload?.error || urlPayload?.message || 'Failed to create image URL');
+      }
 
-      setFormData(prev => ({ ...prev, imageUrl: url }));
+      setFormData(prev => ({ ...prev, imageUrl: urlData.url }));
       setImagePreview(URL.createObjectURL(file));
       toast.success('图片更新成功');
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      toast.error('图片上传失败，请重试');
+      const message = error?.message || '';
+      if (message.includes('Unauthorized')) {
+        toast.error('登录状态已失效，请重新登录后再试。');
+      } else if (message.includes('Forbidden')) {
+        toast.error('当前账号没有上传图片的权限。');
+      } else {
+        toast.error(`图片上传失败：${message || unsupportedMessage('uploadImage')}`);
+      }
     } finally {
       setUploading(false);
     }
@@ -140,8 +165,8 @@ export const EditPlant = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.imageUrl) {
-      toast.error('请填写必要信息并上传图片');
+    if (!formData.name || !formData.imageUrl.trim()) {
+      toast.error('请填写植物名称，并提供可用图片地址');
       return;
     }
 
@@ -157,11 +182,12 @@ export const EditPlant = () => {
         })
       });
 
-      if (!response.ok) throw new Error('Failed to save');
+      const payload = await parseApiJson(response);
+      if (!response.ok || isApiFailure(payload)) throw new Error(payload?.error || payload?.message || 'Failed to save');
       toast.success('植物名录已更新');
-      navigate('/admin/plants');
-    } catch (error) {
-      toast.error('保存失败，请重试');
+      navigate('/admin/plants', { state: { refresh: true, source: 'edit-plant', ts: Date.now() } });
+    } catch (error: any) {
+      toast.error(`保存失败：${error?.message || '请重试'}`);
     } finally {
       setLoading(false);
     }
@@ -236,6 +262,20 @@ export const EditPlant = () => {
                 正在上传图片并同步到云端...
              </div>
           )}
+          <div className="space-y-2">
+            <label className="text-sm font-bold text-gray-900">图片 URL</label>
+            <input
+              type="url"
+              placeholder="https://example.com/plant.jpg"
+              className="w-full bg-white border border-gray-200 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-green-500/20"
+              value={formData.imageUrl}
+              onChange={e => {
+                const value = e.target.value;
+                setFormData(prev => ({ ...prev, imageUrl: value }));
+                if (value) setImagePreview(value);
+              }}
+            />
+          </div>
         </div>
 
         {/* Form Fields Area */}
