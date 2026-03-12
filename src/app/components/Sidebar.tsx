@@ -1,40 +1,38 @@
 import React from 'react';
-import { NavLink } from 'react-router';
+import { NavLink, useNavigate } from 'react-router';
 import { useAuth } from '../context/AuthContext';
-import { 
-  LayoutDashboard, 
-  Sprout, 
-  Activity, 
-  BookOpen, 
-  ClipboardList, 
-  Settings, 
+import {
+  LayoutDashboard,
+  Sprout,
   LogOut,
   Flower2,
-  History,
   Users
 } from 'lucide-react';
 
+const menuItems = [
+  { icon: LayoutDashboard, label: '概览', path: '/admin' },
+  { icon: Sprout, label: '植物库管理', path: '/admin/plants' },
+  { icon: Users, label: '已认领植物', path: '/admin/adoptions' }
+];
+
 export const Sidebar = () => {
   const { signOut } = useAuth();
-  const menuItems = [
-    { icon: LayoutDashboard, label: '概览', path: '/admin' },
-    { icon: Sprout, label: '植物库管理', path: '/admin/plants' },
-    { icon: Users, label: '已认领植物', path: '/admin/adoptions' },
-    { icon: Activity, label: '实时监控', path: '/admin/monitoring' },
-    { icon: History, label: '成长时间轴', path: '/admin/timeline' },
-    { icon: BookOpen, label: '成长日记', path: '/admin/diary' },
-    { icon: ClipboardList, label: '操作日志', path: '/admin/logs' },
-  ];
+  const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/admin/login', { replace: true });
+  };
 
   return (
-    <aside className="w-64 h-screen bg-white border-r border-gray-100 flex flex-col fixed left-0 top-0 z-50">
-      <div className="p-6 flex items-center gap-3">
+    <aside className="w-64 min-h-screen bg-white border-r border-gray-100 flex flex-col shrink-0">
+      <div className="p-6 flex items-center gap-3 border-b border-gray-50">
         <div className="w-10 h-10 bg-green-500 rounded-xl flex items-center justify-center">
           <Flower2 className="text-white w-6 h-6" />
         </div>
         <div>
           <h1 className="text-lg font-bold text-gray-900 leading-tight">心植 HeartPlant</h1>
-          <p className="text-xs text-gray-500">IoT 社交管理后台</p>
+          <p className="text-xs text-gray-500">后台管理</p>
         </div>
       </div>
 
@@ -46,8 +44,8 @@ export const Sidebar = () => {
             end={item.path === '/admin'}
             className={({ isActive }) => `
               flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200
-              ${isActive 
-                ? 'bg-green-50 text-green-600 font-medium' 
+              ${isActive
+                ? 'bg-green-50 text-green-600 font-medium'
                 : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}
             `}
           >
@@ -58,8 +56,8 @@ export const Sidebar = () => {
       </nav>
 
       <div className="p-4 mt-auto border-t border-gray-100">
-        <button 
-          onClick={() => signOut()}
+        <button
+          onClick={handleSignOut}
           className="flex items-center gap-3 px-4 py-3 w-full text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all font-bold text-sm"
         >
           <LogOut size={20} />

@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../utils/supabaseClient';
 import { toast } from 'sonner';
+import { isAdminUser, ADMIN_EMAILS } from '../utils/adminAccess';
 
 export function AdminLogin() {
   const [email, setEmail] = useState('');
@@ -41,16 +42,9 @@ export function AdminLogin() {
       }
 
       if (data.session) {
-        const userEmail = data.session.user?.email?.toLowerCase();
-        const userRole = data.session.user?.user_metadata?.role;
-        
-        const isUserAdmin = userRole === 'admin' || userEmail === '776427024@qq.com';
-        
-        if (!isUserAdmin) {
-          // If logged in with non-admin account, show error but don't force logout 
-          // yet so user knows what's happening
-          setError('权限不足：该账户不具备管理员访问权限');
-          setIsLoading(false);
+        if (!isAdminUser(data.session.user)) {
+          await supabase.auth.signOut();
+          setError(`权限不足：该账户不具备管理员访问权限，请使用 ${ADMIN_EMAILS[0]} 登录`);
           return;
         }
 
@@ -99,7 +93,7 @@ export function AdminLogin() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@heartplant.com"
+                placeholder={ADMIN_EMAILS[0]}
                 className="w-full px-5 py-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-green-500 focus:bg-white outline-none font-bold text-sm transition-all"
                 required
               />

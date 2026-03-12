@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { 
   ArrowLeft, 
@@ -10,8 +10,18 @@ import {
   Plus
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiUrl, buildApiHeaders, isApiFailure, parseApiJson, unwrapApiPayload } from '../utils/api';
+import { apiPost, uploadPlantImage } from '../utils/api';
 import { backendCapabilities, unsupportedMessage } from '../utils/backendCapabilities';
+import {
+  buildPlantLibraryFlashState,
+  notifyPlantImageUploadError,
+  notifyPlantImageUploadSuccess,
+  notifyPlantSaveError,
+} from '../utils/plantFormFeedback';
+
+/** 生成植物卡通形象时使用的默认 prompt（fal.ai 等） */
+export const DEFAULT_CUSTOM_PROMPT =
+  'A cute collection of various potted plant illustrations, each with a unique, expressive cartoon face on its pot representing different emotions (happy, sad, curious, shy, determined, grumpy). The overall style is a clean vector doodle with thick, bold black outlines and a bright, clean, flat color palette. all integrated into a playful, chaotic yet harmonious composition. Add minimal, simple decorative details onto the pots and leaves. No complex gradients or photorealistic textures. Include clear vector-like features.';
 
 export const AddPlant = () => {
   const navigate = useNavigate();
@@ -21,7 +31,16 @@ export const AddPlant = () => {
   const [tags, setTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
 
+  useEffect(() => {
+    return () => {
+      if (imagePreview?.startsWith('blob:')) {
+        URL.revokeObjectURL(imagePreview);
+      }
+    };
+  }, [imagePreview]);
+
   const [formData, setFormData] = useState({
+    species: '',
     name: '',
     type: '',
     difficulty: 'easy',
@@ -31,6 +50,7 @@ export const AddPlant = () => {
     emotionalMeaning: '',
     emotionalSummary: '',
     goldenSentence: '',
+    customPrompt: DEFAULT_CUSTOM_PROMPT,
     dimensions: {
       healing: 80,
       companion: 80,
@@ -39,7 +59,7 @@ export const AddPlant = () => {
       growth: 80,
     },
     imageUrl: '',
-    streamUrl: 'rtsp://admin:reolink123@192.168.92.202:554',
+    streamUrl: (import.meta.env.VITE_DEFAULT_RTSP_URL || ''),
     scene: 'self',
     status: 'active',
   });
@@ -60,57 +80,22 @@ export const AddPlant = () => {
 
     setUploading(true);
     try {
-      // 1. Get signed upload URL
-      const response = await fetch(apiUrl('/upload-url'), {
-        method: 'POST',
-        headers: await buildApiHeaders(true),
-        body: JSON.stringify({
-          fileName: file.name,
-          contentType: file.type
-        })
+      const imageUrl = await uploadPlantImage(file);
+      const previewUrl = URL.createObjectURL(file);
+      setFormData(prev => ({ ...prev, imageUrl }));
+      setImagePreview(prev => {
+        if (prev?.startsWith('blob:')) {
+          URL.revokeObjectURL(prev);
+        }
+        return previewUrl;
       });
-
-      const uploadPayload = await parseApiJson(response);
-      const uploadData = unwrapApiPayload<any>(uploadPayload);
-      if (!response.ok || isApiFailure(uploadPayload) || !uploadData?.uploadUrl || !uploadData?.path) {
-        throw new Error(uploadPayload?.error || uploadPayload?.message || 'Failed to get upload URL');
-      }
-      const { uploadUrl, path } = uploadData;
-
-      // 2. Upload to storage
-      const uploadResponse = await fetch(uploadUrl, {
-        method: 'PUT',
-        body: file,
-        headers: { 'Content-Type': file.type }
-      });
-
-      if (!uploadResponse.ok) throw new Error('Failed to upload image');
-
-      // 3. Get public URL (via our server's signed URL route for the final link)
-      const urlResponse = await fetch(apiUrl(`/image-url/${encodeURIComponent(path)}`), {
-        headers: await buildApiHeaders()
-      });
-      const urlPayload = await parseApiJson(urlResponse);
-      const urlData = unwrapApiPayload<any>(urlPayload);
-      if (!urlResponse.ok || isApiFailure(urlPayload) || !urlData?.url) {
-        throw new Error(urlPayload?.error || urlPayload?.message || 'Failed to create image URL');
-      }
-
-      setFormData(prev => ({ ...prev, imageUrl: urlData.url }));
-      setImagePreview(URL.createObjectURL(file));
-      toast.success('图片上传成功');
+      notifyPlantImageUploadSuccess('图片上传成功');
     } catch (error: any) {
       console.error(error);
-      const message = error?.message || '';
-      if (message.includes('Unauthorized')) {
-        toast.error('登录状态已失效，请重新登录后再试。');
-      } else if (message.includes('Forbidden')) {
-        toast.error('当前账号没有上传图片的权限。');
-      } else {
-        toast.error(`图片上传失败：${message || unsupportedMessage('uploadImage')}`);
-      }
+      notifyPlantImageUploadError(error);
     } finally {
       setUploading(false);
+      e.target.value = '';
     }
   };
 
@@ -127,31 +112,24 @@ export const AddPlant = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.imageUrl.trim()) {
-      toast.error('请填写植物名称，并提供可用图片地址');
+    if (!formData.species || !formData.imageUrl.trim()) {
+      toast.error('请填写植物品种，并提供可用图片地址');
       return;
     }
 
     setLoading(true);
     try {
-      const response = await fetch(apiUrl('/library'), {
-        method: 'POST',
-        headers: await buildApiHeaders(true),
-        body: JSON.stringify({
-          ...formData,
-          tags,
-          adoptCount: 0
-        })
+      await apiPost('/library', {
+        ...formData,
+        tags,
+        adoptCount: 0
       });
-
-      const payload = await parseApiJson(response);
-      if (!response.ok || isApiFailure(payload)) {
-        throw new Error(payload?.error || payload?.message || 'Failed to save');
-      }
-      toast.success('植物已成功添加到名录');
-      navigate('/admin/plants', { state: { refresh: true, source: 'add-plant', ts: Date.now() } });
+      navigate('/admin/plants', {
+        replace: true,
+        state: buildPlantLibraryFlashState('add-plant', '植物已成功添加到名录'),
+      });
     } catch (error: any) {
-      toast.error(`保存失败：${error?.message || '请重试'}`);
+      notifyPlantSaveError(error);
     } finally {
       setLoading(false);
     }
@@ -183,7 +161,15 @@ export const AddPlant = () => {
                 <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
                 <button 
                   type="button"
-                  onClick={() => { setImagePreview(null); setFormData(prev => ({ ...prev, imageUrl: '' })); }}
+                  onClick={() => {
+                    setImagePreview(prev => {
+                      if (prev?.startsWith('blob:')) {
+                        URL.revokeObjectURL(prev);
+                      }
+                      return null;
+                    });
+                    setFormData(prev => ({ ...prev, imageUrl: '' }));
+                  }}
                   className="absolute top-4 right-4 bg-red-500 text-white p-2 rounded-full shadow-lg hover:bg-red-600 transition-all"
                 >
                   <X size={20} />
@@ -222,7 +208,12 @@ export const AddPlant = () => {
               onChange={e => {
                 const value = e.target.value;
                 setFormData(prev => ({ ...prev, imageUrl: value }));
-                if (value) setImagePreview(value);
+                setImagePreview(prev => {
+                  if (prev?.startsWith('blob:')) {
+                    URL.revokeObjectURL(prev);
+                  }
+                  return value || null;
+                });
               }}
             />
             <p className="text-[10px] text-gray-400">若当前环境上传失败，也可以直接粘贴对象存储或公开 CDN 图片地址。</p>
@@ -234,11 +225,22 @@ export const AddPlant = () => {
           <div className="bg-white border border-gray-100 rounded-3xl p-8 space-y-6 shadow-sm">
             <div className="grid grid-cols-2 gap-6">
               <div className="space-y-2">
-                <label className="text-sm font-bold text-gray-900">植物名称</label>
+                <label className="text-sm font-bold text-gray-900">品种 *</label>
                 <input 
                   type="text" 
                   required
-                  placeholder="例如：银皇后" 
+                  placeholder="例如：银皇后、虎皮兰（与认领后用户命名的「名称」隔离）" 
+                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-green-500/20"
+                  value={formData.species}
+                  onChange={e => setFormData({...formData, species: e.target.value})}
+                />
+                <p className="text-[10px] text-gray-400">目录品种，认领后用户可另起「植物名称」</p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-gray-900">库内展示名</label>
+                <input 
+                  type="text" 
+                  placeholder="可选，如不填认领时用户填写名称" 
                   className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-green-500/20"
                   value={formData.name}
                   onChange={e => setFormData({...formData, name: e.target.value})}
@@ -414,6 +416,24 @@ export const AddPlant = () => {
               </div>
             </div>
 
+            <div className="space-y-4 p-6 bg-amber-50/50 rounded-3xl border border-amber-100">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                <h3 className="text-sm font-black text-amber-900 uppercase tracking-widest">AI 卡通形象 Prompt</h3>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-amber-700">customPrompt（生成植物卡通图时使用，英文）</label>
+                <textarea
+                  rows={5}
+                  placeholder={DEFAULT_CUSTOM_PROMPT.slice(0, 80) + '...'}
+                  className="w-full bg-white border border-amber-100 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-amber-500/20 resize-y font-mono"
+                  value={formData.customPrompt ?? ''}
+                  onChange={e => setFormData({ ...formData, customPrompt: e.target.value })}
+                />
+                <p className="text-[10px] text-amber-600">留空则使用默认风格；可用于 /plant-avatar/generate 或后续 AI 生成。</p>
+              </div>
+            </div>
+
             <div className="space-y-4 p-6 bg-blue-50/30 rounded-3xl border border-blue-100/50">
               <div className="flex items-center gap-2 mb-2">
                 <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
@@ -428,7 +448,7 @@ export const AddPlant = () => {
                   value={formData.streamUrl}
                   onChange={e => setFormData({...formData, streamUrl: e.target.value})}
                 />
-                <p className="text-[10px] text-blue-400 font-medium">默认使用内网开发流: rtsp://admin:reolink123@192.168.92.202:554</p>
+                <p className="text-[10px] text-blue-400 font-medium">默认使用内网开发流: rtsp://[user]:[password]@[host]:554</p>
               </div>
             </div>
 

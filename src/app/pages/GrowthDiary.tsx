@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router';
 import { toast } from 'sonner';
-import { apiUrl, buildApiHeaders, isApiFailure, parseApiJson, unwrapApiPayload } from '../utils/api';
+import { getGrowthDiaryData } from '../utils/api';
 
 export const GrowthDiary = () => {
   const navigate = useNavigate();
@@ -22,47 +22,16 @@ export const GrowthDiary = () => {
   const [allJournals, setAllJournals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [activePlantFilter, setActivePlantFilter] = useState<string>(location.state?.plantId || '');
+  const [activePlantName, setActivePlantName] = useState<string>(location.state?.plantName || '');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const fetchData = async () => {
     setIsRefreshing(true);
     try {
-      // 1. Fetch plants for mapping
-      const plantResponse = await fetch(apiUrl('/plants'), {
-        headers: await buildApiHeaders()
-      });
-      const plantPayload = await parseApiJson(plantResponse);
-      if (!plantResponse.ok || isApiFailure(plantPayload)) {
-        throw new Error(plantPayload?.error || plantPayload?.message || 'Failed to fetch plants');
-      }
-      const plantData = unwrapApiPayload<any[]>(plantPayload);
-      const safePlants = Array.isArray(plantData) ? plantData : [];
+      const { plants: safePlants, journals } = await getGrowthDiaryData();
       setPlants(safePlants);
-
-      // 2. Fetch all journals using the new efficient endpoint
-      const url = apiUrl('/all-journals');
-      console.log('Fetching journals from:', url);
-      const journalResponse = await fetch(url, {
-        headers: await buildApiHeaders()
-      });
-      const journalPayload = await parseApiJson(journalResponse);
-      if (!journalResponse.ok || isApiFailure(journalPayload)) {
-        throw new Error(journalPayload?.error || journalPayload?.message || `Failed to fetch journals: ${journalResponse.status}`);
-      }
-      const journalData = unwrapApiPayload<any[]>(journalPayload);
-      const safeJournals = Array.isArray(journalData) ? journalData : [];
-
-      // Enhance journal data with plant info
-      const enhancedJournals = safeJournals.map((journal: any) => {
-        const plant = safePlants.find((p: any) => String(p.id) === String(journal.plantId));
-        return {
-          ...journal,
-          plantName: plant?.name || '未知植物',
-          plantImage: plant?.imageUrl || plant?.image || 'https://images.unsplash.com/photo-1485955900006-10f4d324d411?q=80&w=100'
-        };
-      });
-      
-      setAllJournals(enhancedJournals);
+      setAllJournals(journals);
     } catch (error) {
       toast.error('加载日记数据失败');
       console.error(error);
@@ -77,22 +46,41 @@ export const GrowthDiary = () => {
   }, []);
 
   useEffect(() => {
+    if (location.state?.plantId) {
+      setActivePlantFilter(location.state.plantId);
+      setActivePlantName(location.state.plantName || '');
+    }
+
     if (location.state?.refresh) {
       fetchData();
-      navigate(location.pathname, { replace: true, state: null });
+      navigate(location.pathname, {
+        replace: true,
+        state: location.state?.plantId
+          ? {
+              plantId: location.state.plantId,
+              plantName: location.state.plantName,
+              from: location.state.from,
+              refreshOnBack: location.state.refreshOnBack,
+            }
+          : null,
+      });
     }
   }, [location.key]);
 
   const filteredJournals = useMemo(() => {
-    if (!searchTerm.trim()) return allJournals;
+    const baseList = activePlantFilter
+      ? allJournals.filter(j => String(j.plantId) === String(activePlantFilter))
+      : allJournals;
+
+    if (!searchTerm.trim()) return baseList;
     
     const term = searchTerm.toLowerCase();
-    return allJournals.filter(j => 
+    return baseList.filter(j => 
       j.title?.toLowerCase().includes(term) || 
       j.plantName?.toLowerCase().includes(term) ||
       j.entries?.some((e: any) => e.text?.toLowerCase().includes(term) || e.author?.toLowerCase().includes(term))
     );
-  }, [allJournals, searchTerm]);
+  }, [activePlantFilter, allJournals, searchTerm]);
 
   const stats = useMemo(() => {
     const today = new Date().toLocaleDateString();
@@ -114,6 +102,33 @@ export const GrowthDiary = () => {
         <div>
           <h2 className="text-2xl font-bold text-gray-900 text-shadow-sm">成长日记管理</h2>
           <p className="text-sm text-gray-500 mt-1 italic">查阅用户与其心植之间的温情时刻</p>
+          {activePlantFilter && (
+            <div className="mt-3 flex items-center gap-3 flex-wrap">
+              <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-green-50 text-green-700 text-xs font-bold border border-green-100">
+                当前植物：{activePlantName || '定向筛选'}
+              </span>
+              <button
+                onClick={() => {
+                  setActivePlantFilter('');
+                  setActivePlantName('');
+                  navigate(location.pathname, { replace: true, state: null });
+                }}
+                className="text-xs font-bold text-gray-500 hover:text-green-600 transition-colors"
+              >
+                清除筛选
+              </button>
+              {location.state?.from && (
+                <button
+                  onClick={() => navigate(location.state.from, {
+                    state: location.state?.refreshOnBack ? { refresh: true, source: 'diary-back', ts: Date.now() } : undefined,
+                  })}
+                  className="text-xs font-bold text-gray-500 hover:text-green-600 transition-colors"
+                >
+                  返回已认领植物
+                </button>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex gap-3">
           <button 
@@ -196,7 +211,17 @@ export const GrowthDiary = () => {
               <div 
                 key={journal.id} 
                 className="bg-white border border-gray-100 rounded-[32px] p-6 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group cursor-pointer"
-                onClick={() => navigate(`/admin/diary/${journal.id}`)}
+                onClick={() => navigate(`/admin/diary/${journal.id}`, {
+                  state: {
+                    refreshList: true,
+                    plantId: activePlantFilter || journal.plantId,
+                    plantName: activePlantName || journal.plantName,
+                    from: location.state?.from,
+                    refreshOnBack: location.state?.refreshOnBack,
+                    source: 'diary-list',
+                    ts: Date.now(),
+                  },
+                })}
               >
                 <div className="flex items-start justify-between mb-5">
                   <div className="flex items-center gap-4">

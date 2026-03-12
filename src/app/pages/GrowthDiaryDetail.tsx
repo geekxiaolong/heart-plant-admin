@@ -15,7 +15,7 @@ import {
   Heart
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiUrl, buildApiHeaders, isApiFailure, parseApiJson, unwrapApiPayload } from '../utils/api';
+import { deleteJournal, getJournalDetail, getPlantById, toggleJournalFeatured } from '../utils/api';
 import { backendCapabilities, unsupportedMessage } from '../utils/backendCapabilities';
 
 export const GrowthDiaryDetail = () => {
@@ -28,41 +28,45 @@ export const GrowthDiaryDetail = () => {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const handleBackToList = () => {
+    if (location.state?.returnToTimeline && location.state?.plantId) {
+      navigate(`/admin/timeline/${location.state.plantId}`, {
+        state: {
+          plantId: location.state.plantId,
+          from: location.state.from || '/admin/adoptions',
+          refreshOnBack: true,
+          refresh: true,
+          source: location.state?.source || 'journal-detail',
+          ts: location.state?.ts || Date.now(),
+        },
+      });
+      return;
+    }
+
     navigate('/admin/diary', {
       state: location.state?.refreshList
-        ? { refresh: true, source: location.state?.source || 'journal-detail', ts: location.state?.ts || Date.now() }
+        ? {
+            refresh: true,
+            plantId: location.state?.plantId,
+            plantName: location.state?.plantName,
+            from: location.state?.from,
+            refreshOnBack: location.state?.refreshOnBack,
+            source: location.state?.source || 'journal-detail',
+            ts: location.state?.ts || Date.now(),
+          }
         : undefined,
     });
   };
 
   const fetchJournalDetail = async () => {
     try {
-      // 1. Fetch the journal
-      const response = await fetch(apiUrl(`/journal-detail/${id}`), {
-        headers: await buildApiHeaders()
-      });
-      const payload = await parseApiJson(response);
-      if (!response.ok || isApiFailure(payload)) {
-        throw new Error(payload?.error || payload?.message || 'Failed to fetch journal');
-      }
-      const data = unwrapApiPayload<any>(payload);
+      const data = await getJournalDetail(id as string);
       if (!data || typeof data !== 'object') {
         throw new Error('Invalid journal detail payload');
       }
       setJournal(data);
 
-      // 2. Fetch the plant info for context
       if (data.plantId) {
-        const plantResponse = await fetch(apiUrl('/plants'), {
-          headers: await buildApiHeaders()
-        });
-        const plantPayload = await parseApiJson(plantResponse);
-        if (!plantResponse.ok || isApiFailure(plantPayload)) {
-          throw new Error(plantPayload?.error || plantPayload?.message || 'Failed to fetch plants');
-        }
-        const plants = unwrapApiPayload<any[]>(plantPayload);
-        const safePlants = Array.isArray(plants) ? plants : [];
-        const foundPlant = safePlants.find((p: any) => String(p.id) === String(data.plantId));
+        const foundPlant = await getPlantById(data.plantId);
         setPlant(foundPlant || null);
       }
     } catch (error) {
@@ -81,15 +85,7 @@ export const GrowthDiaryDetail = () => {
 
     setIsProcessing(true);
     try {
-      const response = await fetch(apiUrl(`/journal-feature/${id}`), {
-        method: 'POST',
-        headers: await buildApiHeaders()
-      });
-      const payload = await parseApiJson(response);
-      const data = unwrapApiPayload<any>(payload);
-      if (!response.ok || isApiFailure(payload)) {
-        throw new Error(payload?.error || payload?.message || '操作失败');
-      }
+      const data = await toggleJournalFeatured(id as string);
       const nextFeatured = typeof data?.isFeatured === 'boolean' ? data.isFeatured : !journal?.isFeatured;
       setJournal((prev: any) => prev ? { ...prev, isFeatured: nextFeatured } : prev);
       toast.success(nextFeatured ? '已设为精选' : '已取消精选');
@@ -125,16 +121,32 @@ export const GrowthDiaryDetail = () => {
     
     setIsProcessing(true);
     try {
-      const response = await fetch(apiUrl(`/journal/${id}`), {
-        method: 'DELETE',
-        headers: await buildApiHeaders()
-      });
-      const payload = await parseApiJson(response);
-      if (!response.ok || isApiFailure(payload)) {
-        throw new Error(payload?.error || payload?.message || '删除失败');
-      }
+      await deleteJournal(id as string);
       toast.success('日记已成功下架');
-      navigate('/admin/diary', { state: { refresh: true, source: 'journal-delete', ts: Date.now() } });
+      if (location.state?.returnToTimeline && location.state?.plantId) {
+        navigate(`/admin/timeline/${location.state.plantId}`, {
+          state: {
+            plantId: location.state.plantId,
+            from: location.state.from || '/admin/adoptions',
+            refreshOnBack: true,
+            refresh: true,
+            source: 'journal-delete',
+            ts: Date.now(),
+          },
+        });
+      } else {
+        navigate('/admin/diary', {
+          state: {
+            refresh: true,
+            plantId: location.state?.plantId,
+            plantName: location.state?.plantName,
+            from: location.state?.from,
+            refreshOnBack: location.state?.refreshOnBack,
+            source: 'journal-delete',
+            ts: Date.now(),
+          },
+        });
+      }
     } catch (error: any) {
       const message = error?.message || '';
       if (message.includes('Unauthorized')) {

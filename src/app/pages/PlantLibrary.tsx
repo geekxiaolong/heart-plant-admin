@@ -1,112 +1,110 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { 
   Search, 
   Plus, 
-  Filter, 
-  MoreVertical, 
   Trash2, 
   Edit3, 
   ChevronRight,
   Loader2,
   AlertCircle,
   History,
-  Heart
+  Heart,
+  RefreshCw
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
-import { apiDelete, apiGet, unwrapApiPayload } from '../utils/api';
-import { unsupportedMessage } from '../utils/backendCapabilities';
-
-interface Plant {
-  id: string;
-  name: string;
-  type: string;
-  difficulty: 'easy' | 'medium' | 'hard';
-  description: string;
-  imageUrl: string;
-  scene: string;
-  status: string;
-  tags: string[];
-  adoptCount: number;
-  addedDate: string;
-  habits: string;
-  lifespan: string;
-  emotionalMeaning: string;
-}
+import {
+  deletePlantLibraryItem,
+  fetchPlantLibrary,
+  getDeletePlantErrorMessage,
+  getPlantRequestErrorMessage,
+  type PlantLibraryItem as Plant,
+} from '../utils/adminPlants';
+import type { PlantLibraryFlashState } from '../utils/plantFormFeedback';
 
 export const PlantLibrary = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [plants, setPlants] = useState<Plant[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
 
-  const fetchLibrary = async () => {
+  const fetchLibrary = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
+
+    if (silent) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+
     try {
-      const data = await apiGet<any>('/library');
-      const safePlants = Array.isArray(data)
-        ? data
-        : Array.isArray(unwrapApiPayload<any>(data))
-          ? unwrapApiPayload<any>(data)
-          : [];
-      setPlants(safePlants as Plant[]);
-    } catch (error: any) {
-      toast.error('获取植物库失败：' + error.message);
+      const data = await fetchPlantLibrary();
+      setPlants(data);
+    } catch (error) {
+      toast.error('获取植物库失败：' + getPlantRequestErrorMessage(error, '请重试'));
       console.error('Fetch library error:', error);
     } finally {
-      setLoading(false);
+      if (silent) {
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+      }
     }
-  };
-
-  useEffect(() => {
-    fetchLibrary();
   }, []);
 
   useEffect(() => {
-    if (location.state?.refresh) {
-      fetchLibrary();
-      navigate(location.pathname, { replace: true, state: null });
-    }
-  }, [location.key]);
+    fetchLibrary();
+  }, [fetchLibrary]);
+
+  useEffect(() => {
+    const navigationState = location.state as PlantLibraryFlashState | null;
+    if (!navigationState?.refresh) return;
+
+    let cancelled = false;
+
+    const refreshAfterBackflow = async () => {
+      await fetchLibrary({ silent: true });
+
+      if (!cancelled && navigationState.flash?.type === 'success') {
+        toast.success(navigationState.flash.message);
+      }
+
+      if (!cancelled) {
+        navigate(location.pathname, { replace: true, state: null });
+      }
+    };
+
+    void refreshAfterBackflow();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchLibrary, location.pathname, location.state, navigate]);
 
   const handleDelete = async (id: string) => {
     if (!confirm('确定要删除这个植物吗？此操作不可撤销。')) return;
 
     try {
-      const result = await apiDelete<{ success?: boolean; error?: string }>(`/library/${id}`);
-      if (result?.success === false) {
-        throw new Error(result.error || '删除失败');
-      }
+      await deletePlantLibraryItem(id);
       toast.success('植物已从名录移除');
-      await fetchLibrary();
-    } catch (error: any) {
-      const message = error?.message || '';
-      if (message.includes('KV delete is not available')) {
-        toast.error('当前运行环境暂未开启删除能力，请稍后重试或检查 KV 删除支持。');
-        return;
+      await fetchLibrary({ silent: true });
+    } catch (error) {
+      const message = getDeletePlantErrorMessage(error);
+      toast.error(message);
+
+      if (message.includes('列表将自动刷新')) {
+        await fetchLibrary({ silent: true });
       }
-      if (message.includes('Unauthorized')) {
-        toast.error('登录状态已失效，请重新登录后再试。');
-        return;
-      }
-      if (message.includes('Forbidden')) {
-        toast.error('当前账号没有删除植物库的权限。');
-        return;
-      }
-      if (message.includes('not found')) {
-        toast.error('该植物已不存在，列表将自动刷新。');
-        await fetchLibrary();
-        return;
-      }
-      toast.error(`删除失败：${message || unsupportedMessage('libraryDelete')}`);
     }
   };
 
   const filteredPlants = plants.filter(plant => {
-    const matchesSearch = plant.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          plant.type.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = (plant.species || plant.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (plant.type || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesFilter = filterType === 'all' || plant.scene === filterType;
     return matchesSearch && matchesFilter;
   });
@@ -127,13 +125,23 @@ export const PlantLibrary = () => {
           <h2 className="text-2xl font-bold text-gray-900">植物名录管理</h2>
           <p className="text-sm text-gray-500 mt-1">管理系统内可供认领的植物信息</p>
         </div>
-        <button 
-          onClick={() => navigate('/admin/plants/add')}
-          className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-xl font-medium transition-all shadow-md active:scale-95"
-        >
-          <Plus size={20} />
-          <span>添加新植物</span>
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => fetchLibrary({ silent: true })}
+            disabled={refreshing}
+            className="flex items-center gap-2 bg-white border border-gray-200 hover:border-green-200 hover:text-green-700 text-gray-700 px-4 py-2.5 rounded-xl font-medium transition-all shadow-sm active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            <RefreshCw size={18} className={refreshing ? 'animate-spin' : ''} />
+            <span>{refreshing ? '刷新中...' : '刷新列表'}</span>
+          </button>
+          <button 
+            onClick={() => navigate('/admin/plants/add')}
+            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-xl font-medium transition-all shadow-md active:scale-95"
+          >
+            <Plus size={20} />
+            <span>添加新植物</span>
+          </button>
+        </div>
       </div>
 
 
@@ -141,7 +149,7 @@ export const PlantLibrary = () => {
         {filteredPlants.map((plant) => (
           <div key={plant.id} className="bg-white border border-gray-100 rounded-3xl p-4 transition-all hover:shadow-xl hover:border-green-100 group">
             <div className="relative aspect-[4/3] rounded-2xl overflow-hidden mb-4 bg-gray-50">
-              <ImageWithFallback src={plant.imageUrl} alt={plant.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+              <ImageWithFallback src={plant.imageUrl} alt={plant.species || plant.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
               <div className="absolute top-3 left-3 flex gap-2">
                 <span className={`px-2 py-1 rounded-md text-[10px] font-bold tracking-wider uppercase backdrop-blur-md bg-white/70 text-gray-900 border border-white/20`}>
                   {plant.type}
@@ -158,7 +166,7 @@ export const PlantLibrary = () => {
             <div>
               <div className="flex items-start justify-between">
                 <div>
-                  <h3 className="text-lg font-bold text-gray-900 leading-tight mb-1">{plant.name}</h3>
+                  <h3 className="text-lg font-bold text-gray-900 leading-tight mb-1">{plant.species || plant.name}</h3>
                   <p className="text-xs text-gray-500 line-clamp-1">{plant.description}</p>
                 </div>
                 <div className="flex gap-2">

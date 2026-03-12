@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { apiUrl, buildApiHeaders } from '../utils/api';
+import { DEFAULT_CUSTOM_PROMPT } from '../pages/AddPlant';
 import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -21,6 +22,7 @@ import {
 
 interface Plant {
   id: number;
+  species?: string;
   name: string;
   type: string;
   description: string;
@@ -28,6 +30,7 @@ interface Plant {
   difficulty: 'easy' | 'medium' | 'hard';
   scene: 'self' | 'family' | 'love' | 'friend';
   status: 'active' | 'inactive';
+  customPrompt?: string;
   addedDate: string;
   adoptCount: number;
 }
@@ -121,6 +124,7 @@ const SCENE_MAP = {
 };
 
 interface PlantFormData {
+  species: string;
   name: string;
   type: string;
   description: string;
@@ -128,6 +132,7 @@ interface PlantFormData {
   difficulty: 'easy' | 'medium' | 'hard';
   scene: 'self' | 'family' | 'love' | 'friend';
   status: 'active' | 'inactive';
+  customPrompt?: string;
 }
 
 interface PlantFormModalProps {
@@ -223,6 +228,7 @@ function PlantDetailModal({ plant, onClose, onEdit }: { plant: Plant, onClose: (
 
 function PlantFormModal({ plant, onClose, onSubmit }: PlantFormModalProps) {
   const [formData, setFormData] = useState<PlantFormData>({
+    species: plant?.species ?? plant?.name ?? '',
     name: plant?.name || '',
     type: plant?.type || '',
     description: plant?.description || '',
@@ -230,6 +236,7 @@ function PlantFormModal({ plant, onClose, onSubmit }: PlantFormModalProps) {
     difficulty: plant?.difficulty || 'easy',
     scene: plant?.scene || 'self',
     status: plant?.status || 'active',
+    customPrompt: plant?.customPrompt ?? DEFAULT_CUSTOM_PROMPT,
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -264,19 +271,31 @@ function PlantFormModal({ plant, onClose, onSubmit }: PlantFormModalProps) {
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {/* Name & Type */}
+          {/* 品种 & 名称 & 类型 */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-black text-gray-700 uppercase tracking-wider mb-2">
-                植物名称 *
+                品种 *
+              </label>
+              <input
+                type="text"
+                value={formData.species}
+                onChange={(e) => setFormData({ ...formData, species: e.target.value })}
+                placeholder="如：银皇后、虎皮兰"
+                className="w-full px-4 py-3 bg-gray-50 rounded-xl border-2 border-gray-200 focus:border-green-500 focus:ring-2 focus:ring-green-200 outline-none font-medium"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-black text-gray-700 uppercase tracking-wider mb-2">
+                库内展示名
               </label>
               <input
                 type="text"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="如：绿萝"
+                placeholder="可选"
                 className="w-full px-4 py-3 bg-gray-50 rounded-xl border-2 border-gray-200 focus:border-green-500 focus:ring-2 focus:ring-green-200 outline-none font-medium"
-                required
               />
             </div>
             <div>

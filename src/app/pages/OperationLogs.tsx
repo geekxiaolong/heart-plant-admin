@@ -11,7 +11,8 @@ import {
   Info,
   Clock,
   ArrowDownToLine,
-  RefreshCcw
+  RefreshCcw,
+  XCircle
 } from 'lucide-react';
 
 const mockLogs = [
@@ -170,11 +171,3 @@ export const OperationLogs = () => {
     </div>
   );
 };
-
-const XCircle = ({ size, className }: { size: number, className: string }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <circle cx="12" cy="12" r="10" />
-    <path d="m15 9-6 6" />
-    <path d="m9 9 6 6" />
-  </svg>
-);

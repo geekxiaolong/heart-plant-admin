@@ -15,7 +15,7 @@ export function StreamTest() {
   const [serverIp, setServerIp] = useState('192.168.92.162');
   const [serverPort, setServerPort] = useState('8889');
   const [streamPath, setStreamPath] = useState('heartplant');
-  const [rtspUrl, setRtspUrl] = useState('rtsp://admin:reolink123@192.168.92.202:554');
+  const [rtspUrl, setRtspUrl] = useState((import.meta.env.VITE_DEFAULT_RTSP_URL || ''));
 
   // Generate URLs based on mode
   const webrtcStreamUrl = `http://${serverIp}:${serverPort}/${streamPath}/whep`;
@@ -249,7 +249,7 @@ export function StreamTest() {
                   <code className="text-xs font-mono text-amber-900 whitespace-pre">
 {`paths:
   heartplant:
-    source: rtsp://admin:reolink123@192.168.92.202:554
+    source: rtsp://<user>:<password>@<host>:554
 
 # 确保 WebRTC 已启用
 webrtc: yes

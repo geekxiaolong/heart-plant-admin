@@ -1,10 +1,11 @@
 import React, { useEffect } from 'react';
 import { useNavigate, Outlet } from 'react-router';
-import { supabase, useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
 import { Loader2, ShieldCheck } from 'lucide-react';
+import { ADMIN_EMAILS } from '../utils/adminAccess';
 
 export const AdminGuard = () => {
-  const { session, loading, isAdmin: isUserAdmin } = useAuth();
+  const { session, loading, isAdmin: isUserAdmin, signOut } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -36,11 +37,11 @@ export const AdminGuard = () => {
         </div>
         <h2 className="text-2xl font-black text-gray-900 tracking-tight mb-2">访问权限不足</h2>
         <p className="text-gray-500 text-sm max-w-xs mb-8">
-          当前账户没有管理员权限。如果您是管理员，请使用 <span className="text-gray-900 font-bold">776427024@qq.com</span> 账号登录。
+          当前账户没有管理员权限。如果您是管理员，请使用 <span className="text-gray-900 font-bold">{ADMIN_EMAILS[0]}</span> 账号登录。
         </p>
         <div className="flex flex-col gap-3 w-full max-w-xs">
            <button 
-             onClick={() => supabase.auth.signOut().then(() => navigate('/admin/login'))}
+             onClick={() => signOut().then(() => navigate('/admin/login', { replace: true }))}
              className="w-full py-4 bg-black text-white rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all"
            >
              切换账号

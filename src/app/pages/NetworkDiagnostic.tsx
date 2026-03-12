@@ -126,7 +126,7 @@ export function NetworkDiagnostic() {
         name: '测试摄像头 HTTP 接口',
         status: 'success',
         message: '摄像头网络可达',
-        details: 'RTSP 源: rtsp://admin:***@192.168.92.202:554',
+        details: 'RTSP 源: rtsp://***:***@[host]:554',
       }));
     } catch (error: any) {
       if (error.name === 'AbortError') {
@@ -275,7 +275,7 @@ export function NetworkDiagnostic() {
 paths:
   heartplant:
     # RTSP 源地址 (摄像头)
-    source: rtsp://admin:reolink123@192.168.92.202:554
+    source: rtsp://<user>:<password>@<host>:554
     sourceOnDemand: yes
 
 # 确保 WebRTC 已启用
@@ -410,7 +410,7 @@ apiAddress: :9997`;
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">RTSP 源:</span>
-                  <span className="font-bold">rtsp://admin:***@192.168.92.202:554</span>
+                  <span className="font-bold">rtsp://***:***@[host]:554</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">WHEP 端点:</span>

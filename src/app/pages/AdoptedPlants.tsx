@@ -1,78 +1,102 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import { useAuth } from '../context/AuthContext';
 import { 
   Search, 
-  Filter, 
   MoreVertical, 
   History,
+  BookOpen,
   Heart,
   Droplets,
   Thermometer,
   Users,
-  Calendar,
   Loader2,
   AlertTriangle,
-  ChevronRight
+  RefreshCw
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiUrl, buildApiHeaders, isApiFailure, parseApiJson, unwrapApiPayload } from '../utils/api';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
-
-interface ClaimedPlant {
-  id: string;
-  name: string;
-  type: string;
-  health: number;
-  temp: number;
-  humidity: number;
-  image: string;
-  owners: string[];
-  days: number;
-  alert: boolean;
-  created_at: string;
-}
+import {
+  fetchClaimedPlants,
+  getPlantRequestErrorMessage,
+  type ClaimedPlantItem as ClaimedPlant,
+} from '../utils/adminPlants';
 
 export const AdoptedPlants = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { session } = useAuth();
   const [plants, setPlants] = useState<ClaimedPlant[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  const fetchClaimedPlants = async () => {
-    if (!session?.access_token) return;
-    try {
-      const url = apiUrl('/plants?admin_view=true');
-      console.log('Fetching adoptions from:', url);
-      const response = await fetch(url, {
-        headers: await buildApiHeaders()
-      });
-
-      const payload = await parseApiJson(response);
-      if (!response.ok || isApiFailure(payload)) {
-        console.error('Server error response:', payload);
-        throw new Error(payload?.error || payload?.message || `Server responded with ${response.status}`);
-      }
-
-      const data = unwrapApiPayload<any[]>(payload);
-      setPlants(Array.isArray(data) ? data : []);
-    } catch (error: any) {
-      toast.error('获取认领数据失败: ' + (error.message || '网络错误'));
-      console.error('Fetch error:', error);
-    } finally {
+  const loadClaimedPlants = useCallback(async (options?: { silent?: boolean }) => {
+    if (!session?.access_token) {
+      setPlants([]);
       setLoading(false);
+      setRefreshing(false);
+      return;
     }
-  };
+
+    const silent = options?.silent === true;
+    if (silent) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+
+    try {
+      const data = await fetchClaimedPlants();
+      setPlants(data);
+    } catch (error) {
+      toast.error('获取认领数据失败：' + getPlantRequestErrorMessage(error, '网络错误'));
+      console.error('Fetch claimed plants error:', error);
+    } finally {
+      if (silent) {
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+      }
+    }
+  }, [session?.access_token]);
 
   useEffect(() => {
-    fetchClaimedPlants();
-  }, [session]);
+    loadClaimedPlants();
+  }, [loadClaimedPlants]);
+
+  useEffect(() => {
+    if (!location.state?.refresh) return;
+
+    let cancelled = false;
+
+    const refreshAfterBackflow = async () => {
+      await loadClaimedPlants({ silent: true });
+
+      if (!cancelled) {
+        navigate(location.pathname, { replace: true, state: null });
+      }
+    };
+
+    void refreshAfterBackflow();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadClaimedPlants, location.pathname, location.state, navigate]);
 
   const filteredPlants = plants.filter(plant => 
-    plant.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    plant.owners.some(owner => owner.toLowerCase().includes(searchTerm.toLowerCase()))
+    (plant.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+    (plant.owners || []).some(owner => String(owner).toLowerCase().includes(searchTerm.toLowerCase()))
   );
+
+  const getDaysSinceAdoption = (plant: ClaimedPlant): number => {
+    const raw = plant.adoptedAt || plant.created_at;
+    if (!raw) return 0;
+    const adopted = new Date(raw).getTime();
+    if (Number.isNaN(adopted)) return 0;
+    return Math.max(0, Math.floor((Date.now() - adopted) / (24 * 60 * 60 * 1000)));
+  };
 
   if (loading) {
     return (
@@ -90,15 +114,25 @@ export const AdoptedPlants = () => {
           <h2 className="text-2xl font-bold text-gray-900">已认领植物管理</h2>
           <p className="text-sm text-gray-500 mt-1">监控用户认领的植物状态及成长历程</p>
         </div>
-        <div className="bg-white border border-gray-100 rounded-2xl px-4 py-2 flex items-center gap-4 shadow-sm">
-          <div className="text-center">
-            <p className="text-[10px] font-bold text-gray-400 uppercase">总认领数</p>
-            <p className="text-lg font-black text-green-600">{plants.length}</p>
-          </div>
-          <div className="w-px h-8 bg-gray-100"></div>
-          <div className="text-center">
-            <p className="text-[10px] font-bold text-gray-400 uppercase">预警中</p>
-            <p className="text-lg font-black text-red-500">{plants.filter(p => p.alert).length}</p>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => loadClaimedPlants({ silent: true })}
+            disabled={refreshing}
+            className="flex items-center gap-2 bg-white border border-gray-200 hover:border-green-200 hover:text-green-700 text-gray-700 px-4 py-2.5 rounded-xl font-medium transition-all shadow-sm active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            <RefreshCw size={18} className={refreshing ? 'animate-spin' : ''} />
+            <span>{refreshing ? '刷新中...' : '刷新数据'}</span>
+          </button>
+          <div className="bg-white border border-gray-100 rounded-2xl px-4 py-2 flex items-center gap-4 shadow-sm">
+            <div className="text-center">
+              <p className="text-[10px] font-bold text-gray-400 uppercase">总认领数</p>
+              <p className="text-lg font-black text-green-600">{plants.length}</p>
+            </div>
+            <div className="w-px h-8 bg-gray-100"></div>
+            <div className="text-center">
+              <p className="text-[10px] font-bold text-gray-400 uppercase">预警中</p>
+              <p className="text-lg font-black text-red-500">{plants.filter(p => p.alert).length}</p>
+            </div>
           </div>
         </div>
       </div>
@@ -137,9 +171,9 @@ export const AdoptedPlants = () => {
                       <span className="text-[10px] text-white/80 font-medium uppercase tracking-widest">{plant.type} 模式</span>
                     </div>
                   </div>
-                  <div className="bg-white/20 backdrop-blur-md rounded-xl p-2 text-white border border-white/20">
+                  <div className="bg-white/20 backdrop-blur-md rounded-xl px-3 py-2 text-white border border-white/20">
                     <p className="text-[10px] font-bold opacity-80 leading-none">认领天数</p>
-                    <p className="text-sm font-black mt-0.5">{plant.days} DAYS</p>
+                    <p className="text-sm font-black mt-0.5">{getDaysSinceAdoption(plant)} 天</p>
                   </div>
                 </div>
               </div>
@@ -182,11 +216,35 @@ export const AdoptedPlants = () => {
 
               <div className="pt-4 border-t border-gray-50 flex gap-3">
                 <button 
-                  onClick={() => navigate(`/admin/timeline/${plant.id}`)}
-                  className="flex-1 bg-gray-900 text-white py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 hover:bg-black transition-all active:scale-95"
+                  onClick={() => navigate(`/admin/timeline/${plant.id}`, {
+                    state: {
+                      plantId: plant.id,
+                      from: '/admin/adoptions',
+                      refreshOnBack: true,
+                      source: 'adopted-plants',
+                      ts: Date.now(),
+                    },
+                  })}
+                  className="flex-1 bg-white border border-gray-200 text-gray-700 py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 hover:text-green-600 hover:border-green-300 hover:bg-green-50 transition-all active:scale-95"
                 >
                   <History size={16} />
                   成长时间轴
+                </button>
+                <button
+                  onClick={() => navigate('/admin/diary', {
+                    state: {
+                      plantId: plant.id,
+                      plantName: plant.name,
+                      from: '/admin/adoptions',
+                      refreshOnBack: true,
+                      source: 'adopted-plants',
+                      ts: Date.now(),
+                    },
+                  })}
+                  className="flex-1 bg-white border border-gray-200 text-gray-700 py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 hover:text-green-600 hover:border-green-300 hover:bg-green-50 transition-all active:scale-95"
+                >
+                  <BookOpen size={16} />
+                  成长日记
                 </button>
                 <button className="w-12 h-12 bg-gray-50 border border-gray-100 rounded-2xl flex items-center justify-center text-gray-400 hover:text-green-600 hover:bg-green-50 transition-all">
                   <MoreVertical size={18} />

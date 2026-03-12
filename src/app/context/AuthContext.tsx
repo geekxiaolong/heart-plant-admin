@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../utils/supabaseClient';
+import { isAdminUser } from '../utils/adminAccess';
 
 interface AuthContextType {
   session: Session | null;
@@ -58,8 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
   };
 
-  const userEmail = state.user?.email?.toLowerCase();
-  const isAdmin = userEmail === '776427024@qq.com' || state.user?.user_metadata?.role === 'admin';
+  const isAdmin = isAdminUser(state.user);
 
   return (
     <AuthContext.Provider value={{ ...state, isAdmin, signOut }}>

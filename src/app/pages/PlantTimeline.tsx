@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router';
+import { useParams, useNavigate, useLocation } from 'react-router';
 import { 
   ChevronLeft, 
   Droplet, 
@@ -18,7 +18,7 @@ import {
   Heart
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiUrl, buildApiHeaders, isApiFailure, parseApiJson, unwrapApiPayload } from '../utils/api';
+import { getPlantTimeline, getTimelinePlants } from '../utils/api';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 
 interface TimelineItem {
@@ -46,7 +46,9 @@ interface Plant {
 export const PlantTimeline = () => {
   const { plantId } = useParams();
   const navigate = useNavigate();
-  const [selectedPlantId, setSelectedPlantId] = useState(plantId || '');
+  const location = useLocation();
+  const initialPlantId = plantId || location.state?.plantId || '';
+  const [selectedPlantId, setSelectedPlantId] = useState(initialPlantId);
   const [plants, setPlants] = useState<Plant[]>([]);
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,15 +57,7 @@ export const PlantTimeline = () => {
   // Fetch all claimed plants for the selector
   const fetchPlants = async () => {
     try {
-      const response = await fetch(apiUrl('/plants'), {
-        headers: await buildApiHeaders()
-      });
-      const payload = await parseApiJson(response);
-      if (!response.ok || isApiFailure(payload)) {
-        throw new Error(payload?.error || payload?.message || 'Failed to fetch plants');
-      }
-      const data = unwrapApiPayload<any[]>(payload);
-      const safePlants = Array.isArray(data) ? data : [];
+      const safePlants = await getTimelinePlants();
       setPlants(safePlants);
       if (!selectedPlantId && safePlants.length > 0) {
         setSelectedPlantId(safePlants[0].id);
@@ -80,14 +74,7 @@ export const PlantTimeline = () => {
     if (!id) return;
     setTimelineLoading(true);
     try {
-      const response = await fetch(apiUrl(`/plant-timeline/${id}`), {
-        headers: await buildApiHeaders()
-      });
-      const payload = await parseApiJson(response);
-      if (!response.ok || isApiFailure(payload)) {
-        throw new Error(payload?.error || payload?.message || 'Failed to fetch timeline');
-      }
-      const data = unwrapApiPayload<any[]>(payload);
+      const data = await getPlantTimeline(id);
       setTimeline(Array.isArray(data) ? data : []);
     } catch (error) {
       toast.error('无法加载时间轴数据');
@@ -102,10 +89,42 @@ export const PlantTimeline = () => {
   }, []);
 
   useEffect(() => {
+    if (plantId && plantId !== selectedPlantId) {
+      setSelectedPlantId(plantId);
+    }
+  }, [plantId, selectedPlantId]);
+
+  useEffect(() => {
+    if (location.state?.plantId && location.state.plantId !== selectedPlantId) {
+      setSelectedPlantId(location.state.plantId);
+    }
+  }, [location.state, selectedPlantId]);
+
+  useEffect(() => {
     if (selectedPlantId) {
       fetchTimeline(selectedPlantId);
     }
   }, [selectedPlantId]);
+
+  useEffect(() => {
+    if (!location.state?.refresh || !selectedPlantId) return;
+
+    let cancelled = false;
+
+    const refreshAfterBackflow = async () => {
+      await fetchTimeline(selectedPlantId);
+
+      if (!cancelled) {
+        navigate(location.pathname, { replace: true, state: { ...location.state, refresh: false } });
+      }
+    };
+
+    void refreshAfterBackflow();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname, location.state, navigate, selectedPlantId]);
 
   const getMoodIcon = (mood?: string) => {
     switch (mood) {
@@ -149,7 +168,15 @@ export const PlantTimeline = () => {
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-4">
           <button 
-            onClick={() => navigate(-1)}
+            onClick={() => {
+              if (location.state?.from) {
+                navigate(location.state.from, {
+                  state: location.state?.refreshOnBack ? { refresh: true, source: 'timeline-back', ts: Date.now() } : undefined,
+                });
+                return;
+              }
+              navigate(-1);
+            }}
             className="w-10 h-10 rounded-full bg-white border border-gray-100 flex items-center justify-center text-gray-400 hover:text-gray-900 transition-all shadow-sm"
           >
             <ChevronLeft size={20} />
@@ -242,7 +269,16 @@ export const PlantTimeline = () => {
                   
                   {item.type === 'journal' && (
                     <button 
-                      onClick={() => navigate(`/admin/diary/${item.id}`)}
+                      onClick={() => navigate(`/admin/diary/${item.id}`, {
+                        state: {
+                          returnToTimeline: true,
+                          plantId: selectedPlantId,
+                          source: 'timeline-journal',
+                          from: `/admin/timeline/${selectedPlantId}`,
+                          refreshList: true,
+                          ts: Date.now(),
+                        },
+                      })}
                       className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-all"
                     >
                       <ExternalLink size={16} />

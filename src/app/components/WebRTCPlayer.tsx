@@ -272,7 +272,7 @@ const WebSocketStreamPlayer = forwardRef(WebSocketStreamPlayerRender);
 const WebRTCStreamPlayerRender: ForwardRefRenderFunction<any, WebRTCPlayerProps> = (props, ref) => {
   const {
     streamUrl = 'http://192.168.92.162:8889/heartplant/whep',
-    rtspUrl = 'rtsp://admin:reolink123@192.168.92.202:554',
+    rtspUrl = (import.meta.env.VITE_DEFAULT_RTSP_URL || ''),
     className = '',
     onError,
     onConnected,

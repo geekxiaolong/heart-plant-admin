@@ -11,8 +11,15 @@ import {
   Trash2
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiUrl, buildApiHeaders, apiGet, isApiFailure, parseApiJson, unwrapApiPayload } from '../utils/api';
+import { apiGet, apiPost, getApiErrorMessage, uploadPlantImage } from '../utils/api';
 import { backendCapabilities, unsupportedMessage } from '../utils/backendCapabilities';
+import {
+  buildPlantLibraryFlashState,
+  notifyPlantImageUploadError,
+  notifyPlantImageUploadSuccess,
+  notifyPlantSaveError,
+} from '../utils/plantFormFeedback';
+import { DEFAULT_CUSTOM_PROMPT } from './AddPlant';
 
 export const EditPlant = () => {
   const { id } = useParams();
@@ -24,7 +31,16 @@ export const EditPlant = () => {
   const [tags, setTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
 
+  useEffect(() => {
+    return () => {
+      if (imagePreview?.startsWith('blob:')) {
+        URL.revokeObjectURL(imagePreview);
+      }
+    };
+  }, [imagePreview]);
+
   const [formData, setFormData] = useState({
+    species: '',
     name: '',
     type: '',
     difficulty: 'easy',
@@ -34,6 +50,7 @@ export const EditPlant = () => {
     emotionalMeaning: '',
     emotionalSummary: '',
     goldenSentence: '',
+    customPrompt: DEFAULT_CUSTOM_PROMPT,
     dimensions: {
       healing: 80,
       companion: 80,
@@ -42,7 +59,7 @@ export const EditPlant = () => {
       growth: 80,
     },
     imageUrl: '',
-    streamUrl: 'rtsp://admin:reolink123@192.168.92.202:554',
+    streamUrl: (import.meta.env.VITE_DEFAULT_RTSP_URL || ''),
     scene: 'self',
     status: 'active',
   });
@@ -51,16 +68,15 @@ export const EditPlant = () => {
     const fetchPlant = async () => {
       if (!id) return;
       try {
-        const library = await apiGet<any>('/library');
-        const safeLibrary = Array.isArray(library)
-          ? library
-          : Array.isArray(unwrapApiPayload<any[]>(library))
-            ? unwrapApiPayload<any[]>(library)
-            : [];
+        const library = await apiGet<any[]>('/library');
+        const safeLibrary = Array.isArray(library) ? library : [];
         const plant = safeLibrary.find(p => String(p.id) === String(id));
         if (plant) {
           setFormData({
             ...plant,
+            species: plant.species ?? plant.name ?? '',
+            name: plant.name ?? '',
+            customPrompt: typeof plant.customPrompt === 'string' ? plant.customPrompt : DEFAULT_CUSTOM_PROMPT,
             dimensions: plant.dimensions || {
               healing: 80,
               companion: 80,
@@ -101,54 +117,22 @@ export const EditPlant = () => {
 
     setUploading(true);
     try {
-      const response = await fetch(apiUrl('/upload-url'), {
-        method: 'POST',
-        headers: await buildApiHeaders(true),
-        body: JSON.stringify({
-          fileName: file.name,
-          contentType: file.type
-        })
+      const imageUrl = await uploadPlantImage(file);
+      const previewUrl = URL.createObjectURL(file);
+      setFormData(prev => ({ ...prev, imageUrl }));
+      setImagePreview(prev => {
+        if (prev?.startsWith('blob:')) {
+          URL.revokeObjectURL(prev);
+        }
+        return previewUrl;
       });
-
-      const uploadPayload = await parseApiJson(response);
-      const uploadData = unwrapApiPayload<any>(uploadPayload);
-      if (!response.ok || isApiFailure(uploadPayload) || !uploadData?.uploadUrl || !uploadData?.path) {
-        throw new Error(uploadPayload?.error || uploadPayload?.message || 'Failed to get upload URL');
-      }
-      const { uploadUrl, path } = uploadData;
-
-      const uploadResponse = await fetch(uploadUrl, {
-        method: 'PUT',
-        body: file,
-        headers: { 'Content-Type': file.type }
-      });
-
-      if (!uploadResponse.ok) throw new Error('Failed to upload image');
-
-      const urlResponse = await fetch(apiUrl(`/image-url/${encodeURIComponent(path)}`), {
-        headers: await buildApiHeaders()
-      });
-      const urlPayload = await parseApiJson(urlResponse);
-      const urlData = unwrapApiPayload<any>(urlPayload);
-      if (!urlResponse.ok || isApiFailure(urlPayload) || !urlData?.url) {
-        throw new Error(urlPayload?.error || urlPayload?.message || 'Failed to create image URL');
-      }
-
-      setFormData(prev => ({ ...prev, imageUrl: urlData.url }));
-      setImagePreview(URL.createObjectURL(file));
-      toast.success('图片更新成功');
+      notifyPlantImageUploadSuccess('图片更新成功');
     } catch (error: any) {
       console.error(error);
-      const message = error?.message || '';
-      if (message.includes('Unauthorized')) {
-        toast.error('登录状态已失效，请重新登录后再试。');
-      } else if (message.includes('Forbidden')) {
-        toast.error('当前账号没有上传图片的权限。');
-      } else {
-        toast.error(`图片上传失败：${message || unsupportedMessage('uploadImage')}`);
-      }
+      notifyPlantImageUploadError(error);
     } finally {
       setUploading(false);
+      e.target.value = '';
     }
   };
 
@@ -165,29 +149,24 @@ export const EditPlant = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.imageUrl.trim()) {
-      toast.error('请填写植物名称，并提供可用图片地址');
+    if (!formData.species || !formData.imageUrl.trim()) {
+      toast.error('请填写植物品种，并提供可用图片地址');
       return;
     }
 
     setLoading(true);
     try {
-      const response = await fetch(apiUrl('/library'), {
-        method: 'POST',
-        headers: await buildApiHeaders(true),
-        body: JSON.stringify({
-          ...formData,
-          id, // Maintain the same ID
-          tags
-        })
+      await apiPost('/library', {
+        ...formData,
+        id, // Maintain the same ID
+        tags
       });
-
-      const payload = await parseApiJson(response);
-      if (!response.ok || isApiFailure(payload)) throw new Error(payload?.error || payload?.message || 'Failed to save');
-      toast.success('植物名录已更新');
-      navigate('/admin/plants', { state: { refresh: true, source: 'edit-plant', ts: Date.now() } });
+      navigate('/admin/plants', {
+        replace: true,
+        state: buildPlantLibraryFlashState('edit-plant', '植物名录已更新'),
+      });
     } catch (error: any) {
-      toast.error(`保存失败：${error?.message || '请重试'}`);
+      notifyPlantSaveError(error);
     } finally {
       setLoading(false);
     }
@@ -272,7 +251,12 @@ export const EditPlant = () => {
               onChange={e => {
                 const value = e.target.value;
                 setFormData(prev => ({ ...prev, imageUrl: value }));
-                if (value) setImagePreview(value);
+                setImagePreview(prev => {
+                  if (prev?.startsWith('blob:')) {
+                    URL.revokeObjectURL(prev);
+                  }
+                  return value || null;
+                });
               }}
             />
           </div>
@@ -283,11 +267,21 @@ export const EditPlant = () => {
           <div className="bg-white border border-gray-100 rounded-3xl p-8 space-y-6 shadow-sm">
             <div className="grid grid-cols-2 gap-6">
               <div className="space-y-2">
-                <label className="text-sm font-bold text-gray-900">植物名称</label>
+                <label className="text-sm font-bold text-gray-900">品种 *</label>
                 <input 
                   type="text" 
                   required
-                  placeholder="例如：银皇后" 
+                  placeholder="例如：银皇后、虎皮兰" 
+                  className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-green-500/20"
+                  value={formData.species}
+                  onChange={e => setFormData({...formData, species: e.target.value})}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-gray-900">库内展示名</label>
+                <input 
+                  type="text" 
+                  placeholder="可选" 
                   className="w-full bg-gray-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-green-500/20"
                   value={formData.name}
                   onChange={e => setFormData({...formData, name: e.target.value})}
@@ -393,6 +387,24 @@ export const EditPlant = () => {
                     </div>
                   ))}
                 </div>
+              </div>
+            </div>
+
+            <div className="space-y-4 p-6 bg-amber-50/50 rounded-3xl border border-amber-100">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                <h3 className="text-sm font-black text-amber-900 uppercase tracking-widest">AI 卡通形象 Prompt</h3>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-amber-700">customPrompt（生成植物卡通图时使用，英文）</label>
+                <textarea
+                  rows={5}
+                  placeholder={DEFAULT_CUSTOM_PROMPT.slice(0, 80) + '...'}
+                  className="w-full bg-white border border-amber-100 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-amber-500/20 resize-y font-mono"
+                  value={formData.customPrompt ?? ''}
+                  onChange={e => setFormData({ ...formData, customPrompt: e.target.value })}
+                />
+                <p className="text-[10px] text-amber-600">留空则使用默认风格；可用于 /plant-avatar/generate 或后续 AI 生成。</p>
               </div>
             </div>
 

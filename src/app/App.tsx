@@ -37,6 +37,7 @@ const router = createHashRouter([
       </AuthProvider>
     ),
     children: [
+      { index: true, element: <Navigate to="/admin/login" replace /> },
       { path: 'admin/login', element: <AdminLogin /> },
       {
         path: 'admin',
